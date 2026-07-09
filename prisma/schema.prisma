@@ -1,0 +1,141 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../dist/generated/prisma-client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./funklobby.db"
+}
+
+model Mod {
+  id          String    @id @default(uuid())
+  title       String
+  author      String
+  version     String
+  description String
+  engine      String
+  tags        String
+  category    String
+  homepage    String
+  bannerUrl   String
+  thumbnailUrl String
+  fileSize    Int
+  downloadCount Int    @default(0)
+  sourceUrl   String
+  sourceType  String
+  isInstalled Boolean  @default(false)
+  installedAt String?
+  updatedAt   String   @default("")
+  createdAt   String   @default("")
+  dependencies String
+  requirements String
+  changelog   String
+  screenshots String
+  videos      String
+  characters  String
+  songs       String
+  difficulty  String
+  isFeatured  Boolean  @default(false)
+  isTrending  Boolean  @default(false)
+  isPopular   Boolean  @default(false)
+  isFavorited Boolean  @default(false)
+  downloads   Download[]
+  installs    Install[]
+}
+
+model Download {
+  id          String   @id @default(uuid())
+  modId       String
+  mod         Mod      @relation(fields: [modId], references: [id], onDelete: Cascade)
+  url         String
+  fileName    String
+  filePath    String
+  totalBytes  Int
+  downloadedBytes Int  @default(0)
+  status      String   @default("pending")
+  speed       Float    @default(0)
+  eta         Int      @default(0)
+  error       String?
+  createdAt   String   @default("")
+  updatedAt   String   @default("")
+  hash        String?
+}
+
+model Install {
+  id          String   @id @default(uuid())
+  modId       String
+  mod         Mod      @relation(fields: [modId], references: [id], onDelete: Cascade)
+  profileId   String
+  profile     Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  enginePath  String
+  status      String   @default("installed")
+  enabled     Boolean  @default(true)
+  lastPlayedAt String?
+  createdAt   String   @default("")
+  updatedAt   String   @default("")
+  backupPath  String?
+}
+
+model Profile {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  color       String    @default("#3b82f6")
+  isDefault   Boolean   @default(false)
+  createdAt   String    @default("")
+  updatedAt   String    @default("")
+  installs    Install[]
+}
+
+model Engine {
+  id            String   @id @default(uuid())
+  name          String
+  type          String
+  version       String?
+  description   String?
+  author        String?
+  repoUrl       String?
+  websiteUrl    String?
+  downloadUrl   String?
+  releaseUrl    String?
+  installPath   String?
+  exePath       String?
+  logoUrl       String?
+  features      String?
+  platforms     String?
+  license       String?
+  status        String   @default("not_installed")
+  error         String?
+  isCustom      Boolean  @default(false)
+  isDetected    Boolean  @default(false)
+  installedAt   String?
+  lastUpdatedAt String?
+  backupPath    String?
+  createdAt     String   @default("")
+  updatedAt     String   @default("")
+}
+
+model Setting {
+  id    String @id @default(uuid())
+  key   String @unique
+  value String
+}
+
+model Log {
+  id        String @id @default(uuid())
+  level     String
+  message   String
+  details   String?
+  createdAt String @default("")
+}
+
+model Collection {
+  id          String @id @default(uuid())
+  name        String
+  description String?
+  coverUrl    String?
+  modIds      String
+  createdAt   String @default("")
+  updatedAt   String @default("")
+}

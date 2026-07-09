@@ -1,0 +1,108 @@
+{
+  "name": "fnf-lobby",
+  "version": "1.0.0",
+  "description": "FunkLobby - Mod Manager and Launcher for Friday Night Funkin'",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "predev": "node scripts/free-port.mjs 5173",
+    "dev": "concurrently -k \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && electron .",
+    "start": "electron .",
+    "build": "vite build && tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "build:main": "tsc -p tsconfig.main.json",
+    "prisma:generate": "npx prisma generate",
+    "prisma:push": "npx prisma db push",
+    "preview": "vite preview",
+    "clean": "node -e \"require('fs').rmSync('release',{recursive:true,force:true});require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "predist": "node -e \"require('fs').rmSync('release',{recursive:true,force:true})\"",
+    "prepackage": "node -e \"require('fs').rmSync('release',{recursive:true,force:true})\"",
+    "dist": "npm run build && electron-builder",
+    "package": "npm run build && electron-builder",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.14.0",
+    "@radix-ui/react-dialog": "^1.0.5",
+    "@radix-ui/react-dropdown-menu": "^2.0.6",
+    "@radix-ui/react-context-menu": "^2.1.5",
+    "@radix-ui/react-tabs": "^1.0.4",
+    "@radix-ui/react-tooltip": "^1.0.7",
+    "@radix-ui/react-popover": "^1.0.7",
+    "@radix-ui/react-switch": "^1.0.3",
+    "@radix-ui/react-slider": "^1.1.2",
+    "@radix-ui/react-scroll-area": "^1.0.5",
+    "@radix-ui/react-separator": "^1.0.3",
+    "@radix-ui/react-progress": "^1.0.3",
+    "archiver": "^7.0.1",
+    "axios": "^1.7.2",
+    "clsx": "^2.1.1",
+    "debug": "^4.3.4",
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.1.8",
+    "extract-zip": "^2.0.1",
+    "follow-redirects": "^1.15.6",
+    "form-data": "^4.0.0",
+    "framer-motion": "^11.2.6",
+    "https-proxy-agent": "^7.0.4",
+    "lucide-react": "^0.378.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1",
+    "react-router-dom": "^6.23.1",
+    "react-virtuoso": "^4.7.11",
+    "tailwind-merge": "^2.3.0",
+    "unzipper": "^0.12.3",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.2",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/archiver": "^6.0.2",
+    "@types/unzipper": "^0.10.9",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "electron": "^30.0.8",
+    "electron-builder": "^24.13.3",
+    "postcss": "^8.4.38",
+    "prisma": "^5.14.0",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.12",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.funklobby.app",
+    "productName": "FunkLobby",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "prisma/**/*",
+      "pnpm-lock.yaml",
+      ".npmrc"
+    ],
+    "extraResources": [
+      {
+        "from": "prisma/",
+        "to": "prisma/"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}

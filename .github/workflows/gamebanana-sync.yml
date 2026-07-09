@@ -1,0 +1,55 @@
+name: Sync with GameBanana
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      mod_id:
+        description: GameBanana Mod ID
+        required: true
+        type: number
+      owner:
+        description: GitHub repo owner
+        required: true
+        type: string
+      repo:
+        description: GitHub repo name
+        required: true
+        type: string
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r scripts/requirements.txt
+          python --version
+
+      - name: Run sync
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GAMEBANANA_API_KEY: ${{ secrets.GAMEBANANA_API_KEY }}
+          GAMEBANANA_SESSION_TOKEN: ${{ secrets.GAMEBANANA_SESSION_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            # Triggered by a new GitHub release
+            python scripts/cli.py sync \
+              --mod-id ${{ vars.GAMEBANANA_MOD_ID }} \
+              --owner ${{ github.repository_owner }} \
+              --repo ${{ github.event.repository.name }}
+          else
+            # Manual trigger via workflow_dispatch
+            python scripts/cli.py sync \
+              --mod-id ${{ github.event.inputs.mod_id }} \
+              --owner ${{ github.event.inputs.owner }} \
+              --repo ${{ github.event.inputs.repo }}
+          fi
