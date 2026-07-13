@@ -72,6 +72,7 @@ async function migrateSchema(client: PrismaClient) {
     'description', 'author', 'repoUrl', 'websiteUrl', 'downloadUrl',
     'releaseUrl', 'installPath', 'exePath', 'logoUrl', 'features', 'platforms',
     'license', 'status', 'error', 'installedAt', 'lastUpdatedAt', 'backupPath',
+    'importSource',
   ];
   for (const col of engineColumns) {
     try {
@@ -183,6 +184,7 @@ async function pushSchema() {
       downloadUrl TEXT,
       releaseUrl TEXT,
       installPath TEXT,
+      exePath TEXT,
       logoUrl TEXT,
       features TEXT,
       platforms TEXT,
@@ -191,6 +193,7 @@ async function pushSchema() {
       error TEXT,
       isCustom INTEGER NOT NULL DEFAULT 0,
       isDetected INTEGER NOT NULL DEFAULT 0,
+      importSource TEXT,
       installedAt TEXT,
       lastUpdatedAt TEXT,
       backupPath TEXT,
