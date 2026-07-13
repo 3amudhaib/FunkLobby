@@ -35,14 +35,12 @@ export function resolvePackagedAssetPath(relativeSegments: string[], options: Re
 }
 
 export function getSafeChildProcessOptions(cwd: string) {
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
   return {
     cwd,
     windowsHide: false,
-    shell: process.platform === 'win32',
-    detached: false,
-    env: {
-      ...process.env,
-      ELECTRON_RUN_AS_NODE: undefined,
-    },
+    shell: false,
+    env,
   };
 }
