@@ -116,24 +116,12 @@
     ],
     "extraResources": [
       {
-        "from": "assets/icon.ico",
-        "to": "assets/icon.ico"
-      },
-      {
-        "from": "assets/icon.png",
-        "to": "assets/icon.png"
+        "from": "assets",
+        "to": "assets"
       },
       {
         "from": "prisma/",
         "to": "prisma/"
-      },
-      {
-        "from": "assets/icons/themes/",
-        "to": "assets/icons/themes/"
-      },
-      {
-        "from": "assets/engines-banner",
-        "to": "assets/engines-banner"
       }
     ],
     "win": {
