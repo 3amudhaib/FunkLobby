@@ -524,26 +524,33 @@ export class EngineManager {
   }
 
   static async findEngineExeRecursiveAsync(searchPath: string, maxDepth = 5): Promise<string | null> {
-    const extensions = ['.exe', '.love', '.jar'];
+    const preferredExtensions = ['.exe', '.love', '.jar'];
     try {
       const entries = await asyncFs.readdir(searchPath, { withFileTypes: true }) as fs.Dirent[];
+      let best: { path: string; prio: number } | null = null;
 
       for (const entry of entries) {
-        if (entry.isFile()) {
-          const lower = entry.name.toLowerCase();
-          if (extensions.some(ext => lower.endsWith(ext))) {
-            const fullPath = path.join(searchPath, entry.name);
-            try {
-              if (entry.name.endsWith('.exe')) {
-                const stat = await asyncFs.stat(fullPath);
-                if (stat.size > 1024) return fullPath;
-              } else {
-                return fullPath;
-              }
-            } catch { return fullPath; }
-          }
+        if (!entry.isFile()) continue;
+        const lower = entry.name.toLowerCase();
+        let prio = -1;
+        if (lower.endsWith('.exe')) prio = 2;
+        else if (lower.endsWith('.love')) prio = 1;
+        else if (lower.endsWith('.jar')) prio = 0;
+        if (prio < 0) continue;
+
+        const fullPath = path.join(searchPath, entry.name);
+        if (prio === 2) {
+          try {
+            const stat = await asyncFs.stat(fullPath);
+            if (stat.size <= 1024) continue;
+          } catch { continue; }
+        }
+        if (!best || prio > best.prio) {
+          best = { path: fullPath, prio };
         }
       }
+
+      if (best) return best.path;
 
       if (maxDepth > 0) {
         const subdirs = entries
@@ -896,27 +903,56 @@ export class EngineManager {
     });
   }
 
-  static async launchExe(exePath: string, cwd: string): Promise<{ healthOk: boolean; exitCode?: number }> {
+  private static getLoveExePath(): string | null {
+    const lovePaths = [
+      path.join(process.env.LOCALAPPDATA || '', 'LOVE', 'love.exe'),
+      path.join(process.env.PROGRAMFILES || '', 'LOVE', 'love.exe'),
+      path.join(process.env['PROGRAMFILES(X86)'] || '', 'LOVE', 'love.exe'),
+    ];
+    for (const p of lovePaths) {
+      try { if (fs.existsSync(p)) return p; } catch {}
+    }
+    return null;
+  }
+
+  static async launchExe(exePath: string, cwd: string): Promise<{ healthOk: boolean; exitCode?: number; error?: string }> {
     LogManager.info('Launching executable', { exePath, cwd });
     return new Promise((resolve) => {
-      LogManager.info('Launching executable', { exePath, cwd });
-      const proc = spawn(exePath, [], { ...getSafeChildProcessOptions(cwd), stdio: 'ignore' });
+      const isLoveFile = path.extname(exePath).toLowerCase() === '.love';
+      let args: string[] = [];
+      let binary = exePath;
+      if (isLoveFile) {
+        const loveExe = this.getLoveExePath();
+        if (!loveExe) {
+          LogManager.error('Cannot launch .love engine', { exePath, error: 'LOVE runtime not found. Install LOVE from https://love2d.org' });
+          resolve({ healthOk: false, exitCode: 1, error: 'This engine requires the LOVE runtime. Install LOVE from https://love2d.org and try again.' });
+          return;
+        }
+        binary = loveExe;
+        args = [exePath];
+      }
+
+      let stderr = '';
+      const proc = spawn(binary, args, { ...getSafeChildProcessOptions(cwd), stdio: ['ignore', 'ignore', 'pipe'] });
+      proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+
       const timer = setTimeout(() => {
         if (proc.exitCode === null) { resolve({ healthOk: true }); }
-      }, 2000);
+      }, 3000);
 
       proc.on('error', (err) => {
         clearTimeout(timer);
         LogManager.error('Failed to start executable', { exePath, cwd, error: err.message });
-        resolve({ healthOk: false });
+        resolve({ healthOk: false, error: err.message });
       });
       proc.on('exit', (code) => {
         clearTimeout(timer);
         const healthOk = code === null || code === 0;
         if (!healthOk) {
-          LogManager.warn('Executable exited with error', { exePath, cwd, exitCode: code });
+          const diag = stderr ? ` (stderr: ${stderr.trim().slice(0, 200)})` : '';
+          LogManager.warn('Executable exited with error', { exePath, cwd, exitCode: code, stderr: stderr.slice(0, 500) });
         }
-        resolve(healthOk ? { healthOk: true } : { healthOk: false, exitCode: code });
+        resolve(healthOk ? { healthOk: true } : { healthOk: false, exitCode: code, error: stderr ? stderr.trim().slice(0, 200) : undefined });
       });
     });
   }
