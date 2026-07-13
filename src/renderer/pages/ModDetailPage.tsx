@@ -1,15 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Download, Heart, Play, FolderOpen, ExternalLink, Clock, HardDrive, DownloadCloud, Tag, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Download, Heart, Play, FolderOpen, ExternalLink, Clock, HardDrive, DownloadCloud, Tag, ChevronDown, ChevronUp, RefreshCw, Image } from 'lucide-react';
 import { LoadingSpinner } from '../components/LoadingSpinner';
+import { ModCover } from '../components/ModCover';
 import { useModStore } from '../stores/modStore';
 import { useDownloadStore } from '../stores/downloadStore';
 import { useProfileStore } from '../stores/profileStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { formatBytes, formatDate, formatNumber } from '../utils/format';
+import { useTranslation } from '../hooks/useTranslation';
 
 export function ModDetailPage() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { selectedMod, setSelectedMod, installMod, toggleFavorite } = useModStore();
@@ -21,6 +24,12 @@ export function ModDetailPage() {
   const [installing, setInstalling] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
   const [profileId, setProfileId] = useState<string>('');
+
+  const refreshMod = useCallback(async () => {
+    if (!id) return;
+    const mod = await window.electronAPI.getMod(id);
+    setSelectedMod(mod);
+  }, [id, setSelectedMod]);
 
   useEffect(() => {
     (async () => {
@@ -43,7 +52,6 @@ export function ModDetailPage() {
     setDownloading(true);
     try {
       const fileName = `${selectedMod.title.replace(/[^a-zA-Z0-9]/g, '_')}.zip`;
-      // Convert GameBanana page URL to download URL if needed
       let downloadUrl = selectedMod.sourceUrl;
       const gbMatch = downloadUrl?.match(/gamebanana\.com\/mods\/(\d+)/);
       if (gbMatch) {
@@ -64,7 +72,10 @@ export function ModDetailPage() {
     setInstalling(true);
     try {
       await installMod(selectedMod.id, profileId);
-    } catch {}
+      await refreshMod();
+    } catch (err: any) {
+      alert(err?.message || 'Installation failed');
+    }
     setInstalling(false);
   };
 
@@ -83,7 +94,7 @@ export function ModDetailPage() {
   const dependencies = selectedMod?.dependencies ? selectedMod.dependencies.split(',').map((d: string) => d.trim()).filter(Boolean) : [];
 
   if (loading) return <div className="page-container pt-14"><LoadingSpinner className="mt-20" /></div>;
-  if (!selectedMod) return <div className="page-container pt-14"><p className="text-surface-400">Mod not found</p></div>;
+  if (!selectedMod) return <div className="page-container pt-14"><p className="text-surface-400">{t('modDetail.notFound')}</p></div>;
 
   return (
     <div className="page-container pt-14">
@@ -93,27 +104,54 @@ export function ModDetailPage() {
           onClick={() => navigate(-1)}
         >
           <ArrowLeft className="w-4 h-4" />
-          Back
+          {t('modDetail.back')}
         </button>
 
         <div className="relative w-full h-48 md:h-64 rounded-2xl overflow-hidden mb-6">
           {selectedMod.bannerUrl ? (
             <img src={selectedMod.bannerUrl} alt="" className="w-full h-full object-cover" />
           ) : (
-            <div className="w-full h-full bg-gradient-to-r from-primary-900 via-purple-900 to-surface-900" />
+            <div className="w-full h-full bg-gradient-to-br from-primary-800 to-purple-800 flex items-center justify-center">
+              <HardDrive className="w-12 h-12 text-white/30" />
+            </div>
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-surface-950 via-transparent to-transparent" />
         </div>
 
         <div className="flex flex-col md:flex-row gap-6">
-          <div className="w-24 h-24 md:w-32 md:h-32 -mt-16 md:-mt-20 relative z-10 rounded-xl overflow-hidden border-2 border-surface-800 flex-shrink-0">
-            {selectedMod.thumbnailUrl ? (
-              <img src={selectedMod.thumbnailUrl} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full bg-gradient-to-br from-primary-800 to-purple-800 flex items-center justify-center">
-                <HardDrive className="w-8 h-8 text-white/50" />
-              </div>
-            )}
+          <div className="relative">
+            <div className="w-24 h-24 md:w-32 md:h-32 -mt-16 md:-mt-20 relative z-10 rounded-xl overflow-hidden border-2 border-surface-800 flex-shrink-0">
+              <ModCover
+                modId={selectedMod.id}
+                coverPath={selectedMod.coverPath}
+                thumbnailUrl={selectedMod.thumbnailUrl}
+                title={selectedMod.title}
+              />
+            </div>
+            <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 z-20 flex gap-1">
+              <button
+                className="p-1 rounded-lg bg-black/70 hover:bg-black/90 text-white text-xs transition-colors"
+                onClick={async () => {
+                  const mod = await window.electronAPI.setCover(selectedMod.id);
+                  if (mod) setSelectedMod(mod);
+                }}
+                title={t('modDetail.changeCover')}
+              >
+                <Image className="w-3 h-3" />
+              </button>
+              {selectedMod.customCover && (
+                <button
+                  className="p-1 rounded-lg bg-black/70 hover:bg-black/90 text-white text-xs transition-colors"
+                  onClick={async () => {
+                    const mod = await window.electronAPI.removeCover(selectedMod.id);
+                    if (mod) setSelectedMod(mod);
+                  }}
+                  title={t('modDetail.removeCover')}
+                >
+                  <Image className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex-1 min-w-0">
@@ -121,7 +159,7 @@ export function ModDetailPage() {
               <div>
                 <h1 className="text-2xl font-bold text-white">{selectedMod.title}</h1>
                 <p className="text-surface-400 mt-1">
-                  by {selectedMod.author} &middot; v{selectedMod.version}
+                  {t('modDetail.by', { author: selectedMod.author, version: selectedMod.version })}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -142,7 +180,7 @@ export function ModDetailPage() {
 
             <div className="flex flex-wrap items-center gap-2 mt-3">
               <span className="badge-primary">{selectedMod.engine}</span>
-              <span className="badge-surface">{selectedMod.category || 'Other'}</span>
+              <span className="badge-surface">{selectedMod.category || t('modDetail.other')}</span>
               {selectedMod.difficulty && <span className="badge-surface">{selectedMod.difficulty}</span>}
               {tags.map((tag: string) => (
                 <span key={tag} className="badge-surface">{tag}</span>
@@ -150,10 +188,11 @@ export function ModDetailPage() {
             </div>
 
             <div className="flex items-center gap-4 mt-3 text-xs text-surface-400">
-              <span className="flex items-center gap-1"><DownloadCloud className="w-3.5 h-3.5" /> {formatNumber(selectedMod.downloadCount)} downloads</span>
+              <span className="flex items-center gap-1"><DownloadCloud className="w-3.5 h-3.5" /> {t('modDetail.downloads', { count: selectedMod.downloadCount })}</span>
               <span className="flex items-center gap-1"><HardDrive className="w-3.5 h-3.5" /> {formatBytes(selectedMod.fileSize)}</span>
-              <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> Updated {formatDate(selectedMod.updatedAt)}</span>
+              <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {t('modDetail.updated', { date: formatDate(selectedMod.updatedAt) })}</span>
             </div>
+
           </div>
         </div>
 
@@ -166,7 +205,7 @@ export function ModDetailPage() {
                 disabled={downloading}
               >
                 <Download className="w-4 h-4" />
-                {downloading ? 'Downloading...' : 'Download'}
+                {downloading ? t('modDetail.downloading') : t('modDetail.download')}
               </button>
               <select
                 className="input text-sm w-40"
@@ -183,7 +222,7 @@ export function ModDetailPage() {
                 disabled={installing}
               >
                 <DownloadCloud className="w-4 h-4" />
-                {installing ? 'Installing...' : 'Install'}
+                {installing ? t('modDetail.installing') : t('modDetail.install')}
               </button>
             </>
           ) : (
@@ -193,14 +232,14 @@ export function ModDetailPage() {
                 onClick={() => window.electronAPI.launchMod(selectedMod.id, '')}
               >
                 <Play className="w-4 h-4" />
-                Launch
+                {t('modDetail.launch')}
               </button>
               <button
                 className="btn-secondary text-sm flex items-center gap-2"
                 onClick={() => window.electronAPI.openModFolder(selectedMod.id)}
               >
                 <FolderOpen className="w-4 h-4" />
-                Open Folder
+                {t('modDetail.openFolder')}
               </button>
               <button
                 className="btn-ghost text-sm flex items-center gap-2 text-amber-400 hover:text-amber-300"
@@ -209,13 +248,16 @@ export function ModDetailPage() {
                   setInstalling(true);
                   try {
                     await installMod(selectedMod.id, profileId);
-                  } catch {}
+                    await refreshMod();
+                  } catch (err: any) {
+                    alert(err?.message || 'Reinstallation failed');
+                  }
                   setInstalling(false);
                 }}
                 disabled={installing}
               >
                 <RefreshCw className="w-4 h-4" />
-                {installing ? 'Reinstalling...' : 'Reinstall'}
+                {installing ? t('modDetail.reinstalling') : t('modDetail.reinstall')}
               </button>
             </div>
           )}
@@ -227,7 +269,7 @@ export function ModDetailPage() {
               className="btn-ghost text-sm flex items-center gap-2"
             >
               <ExternalLink className="w-4 h-4" />
-              Homepage
+              {t('modDetail.homepage')}
             </a>
           )}
         </div>
@@ -235,16 +277,16 @@ export function ModDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
           <div className="lg:col-span-2 space-y-6">
             <section className="card p-5">
-              <h2 className="text-sm font-semibold text-white mb-3">Description</h2>
+              <h2 className="text-sm font-semibold text-white mb-3">{t('modDetail.description')}</h2>
               <div className={`text-sm text-surface-300 leading-relaxed ${!showFullDesc ? 'line-clamp-4' : ''}`}>
-                {selectedMod.description || 'No description provided.'}
+                {selectedMod.description || t('modDetail.noDescription')}
               </div>
               {selectedMod.description && selectedMod.description.length > 200 && (
                 <button
                   className="text-xs text-primary-400 hover:text-primary-300 mt-2 flex items-center gap-1"
                   onClick={() => setShowFullDesc(!showFullDesc)}
                 >
-                  {showFullDesc ? 'Show less' : 'Read more'}
+                  {showFullDesc ? t('modDetail.showLess') : t('modDetail.showMore')}
                   {showFullDesc ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                 </button>
               )}
@@ -252,10 +294,10 @@ export function ModDetailPage() {
 
             {screenshots.length > 0 && (
               <section className="card p-5">
-                <h2 className="text-sm font-semibold text-white mb-3">Screenshots</h2>
+                <h2 className="text-sm font-semibold text-white mb-3">{t('modDetail.screenshots')}</h2>
                 <div className="grid grid-cols-2 gap-3">
                   {screenshots.map((url: string, i: number) => (
-                    <img key={i} src={url} alt={`Screenshot ${i + 1}`} className="rounded-lg w-full h-32 object-cover" loading="lazy" />
+                    <img key={i} src={url} alt={t('modDetail.screenshot', { index: i + 1 })} className="rounded-lg w-full h-32 object-cover" loading="lazy" />
                   ))}
                 </div>
               </section>
@@ -263,7 +305,7 @@ export function ModDetailPage() {
 
             {selectedMod.changelog && (
               <section className="card p-5">
-                <h2 className="text-sm font-semibold text-white mb-3">Changelog</h2>
+                <h2 className="text-sm font-semibold text-white mb-3">{t('modDetail.changelog')}</h2>
                 <div className="text-sm text-surface-300 whitespace-pre-wrap">{selectedMod.changelog}</div>
               </section>
             )}
@@ -271,38 +313,38 @@ export function ModDetailPage() {
 
           <div className="space-y-4">
             <section className="card p-5">
-              <h2 className="text-sm font-semibold text-white mb-3">Details</h2>
+              <h2 className="text-sm font-semibold text-white mb-3">{t('modDetail.details')}</h2>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-surface-400">Author</span>
+                  <span className="text-surface-400">{t('modDetail.author')}</span>
                   <span className="text-white">{selectedMod.author}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-surface-400">Version</span>
+                  <span className="text-surface-400">{t('modDetail.version')}</span>
                   <span className="text-white">v{selectedMod.version}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-surface-400">Engine</span>
+                  <span className="text-surface-400">{t('modDetail.engine')}</span>
                   <span className="text-white">{selectedMod.engine}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-surface-400">Category</span>
-                  <span className="text-white">{selectedMod.category || 'Other'}</span>
+                  <span className="text-surface-400">{t('modDetail.category')}</span>
+                  <span className="text-white">{selectedMod.category || t('modDetail.other')}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-surface-400">Difficulty</span>
-                  <span className="text-white">{selectedMod.difficulty || 'N/A'}</span>
+                  <span className="text-surface-400">{t('modDetail.difficulty')}</span>
+                  <span className="text-white">{selectedMod.difficulty || t('modDetail.na')}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-surface-400">File Size</span>
+                  <span className="text-surface-400">{t('modDetail.fileSize')}</span>
                   <span className="text-white">{formatBytes(selectedMod.fileSize)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-surface-400">Downloads</span>
+                  <span className="text-surface-400">{t('modDetail.downloads', { count: '' })}</span>
                   <span className="text-white">{formatNumber(selectedMod.downloadCount)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-surface-400">Updated</span>
+                  <span className="text-surface-400">{t('modDetail.updated')}</span>
                   <span className="text-white">{formatDate(selectedMod.updatedAt)}</span>
                 </div>
               </div>
@@ -312,7 +354,7 @@ export function ModDetailPage() {
               <section className="card p-5">
                 <h2 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
                   <Tag className="w-4 h-4 text-primary-400" />
-                  Dependencies
+                  {t('modDetail.dependencies')}
                 </h2>
                 <div className="space-y-1">
                   {dependencies.map((dep: string) => (
@@ -326,7 +368,7 @@ export function ModDetailPage() {
 
             {selectedMod.requirements && (
               <section className="card p-5">
-                <h2 className="text-sm font-semibold text-white mb-3">Requirements</h2>
+                <h2 className="text-sm font-semibold text-white mb-3">{t('modDetail.requirements')}</h2>
                 <p className="text-sm text-surface-300">{selectedMod.requirements}</p>
               </section>
             )}

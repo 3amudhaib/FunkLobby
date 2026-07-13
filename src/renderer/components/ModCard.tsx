@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Download, Clock, HardDrive, Trash2, Heart, Play } from 'lucide-react';
+import { Download, Clock, HardDrive, Image, ImageOff, RotateCcw } from 'lucide-react';
 import { formatBytes, formatNumber, formatDate } from '../utils/format';
-import * as ContextMenu from '@radix-ui/react-context-menu';
+import { ModCover } from './ModCover';
+import { useTranslation } from '../hooks/useTranslation';
 
 interface ModCardProps {
   mod: any;
@@ -10,11 +12,26 @@ interface ModCardProps {
 }
 
 export function ModCard({ mod, index = 0 }: ModCardProps) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
+  const [showCoverMenu, setShowCoverMenu] = useState(false);
+  const [coverVersion, setCoverVersion] = useState(0);
+
+  const handleSetCover = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowCoverMenu(false);
+    await window.electronAPI.setCover(mod.id);
+    setCoverVersion(v => v + 1);
+  };
+
+  const handleRemoveCover = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowCoverMenu(false);
+    await window.electronAPI.removeCover(mod.id);
+    setCoverVersion(v => v + 1);
+  };
 
   return (
-    <ContextMenu.Root>
-      <ContextMenu.Trigger asChild>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -23,27 +40,60 @@ export function ModCard({ mod, index = 0 }: ModCardProps) {
           onClick={() => navigate(`/mod/${mod.id}`)}
         >
           <div className="relative aspect-[16/9] overflow-hidden">
-            {mod.thumbnailUrl ? (
-              <img
-                src={mod.thumbnailUrl}
-                alt={mod.title}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                loading="lazy"
-              />
-            ) : (
-              <div className="w-full h-full bg-gradient-to-br from-primary-900/50 to-surface-800 flex items-center justify-center">
-                <HardDrive className="w-8 h-8 text-surface-600" />
-              </div>
-            )}
-            {mod.isFeatured && (
-              <span className="absolute top-2 left-2 badge-primary text-[10px]">Featured</span>
-            )}
+            <ModCover
+              modId={mod.id}
+              coverPath={mod.coverPath}
+              thumbnailUrl={mod.thumbnailUrl}
+              title={mod.title}
+            />
+            <div className="absolute top-2 left-2 flex gap-1">
+              {mod.isFeatured && (
+                <span className="badge-primary text-[10px]">{t('modCard.featured')}</span>
+              )}
+              {mod.customCover && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                  {t('modCard.custom')}
+                </span>
+              )}
+            </div>
             {mod.isInstalled && (
               <span className="absolute top-2 right-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                Installed
+                {t('modCard.installed')}
               </span>
             )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+            <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="relative">
+                <button
+                  className="p-1.5 rounded-lg bg-black/60 hover:bg-black/80 text-white text-xs transition-colors"
+                  onClick={(e) => { e.stopPropagation(); setShowCoverMenu(!showCoverMenu); }}
+                  title={t('modCard.coverOptions')}
+                >
+                  <Image className="w-3.5 h-3.5" />
+                </button>
+                {showCoverMenu && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); setShowCoverMenu(false); }} />
+                    <div className="absolute right-0 top-full mt-1 w-40 glass rounded-xl border border-white/[0.06] shadow-xl z-20 py-1">
+                      <button
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-300 hover:bg-white/5 hover:text-white transition-colors"
+                        onClick={handleSetCover}
+                      >
+                        <Image className="w-3.5 h-3.5" />
+                        {t('modCard.changeCover')}
+                      </button>
+                      <button
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-surface-300 hover:bg-white/5 hover:text-white transition-colors"
+                        onClick={handleRemoveCover}
+                      >
+                        <ImageOff className="w-3.5 h-3.5" />
+                        {t('modCard.removeCover')}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="p-3">
@@ -85,20 +135,5 @@ export function ModCard({ mod, index = 0 }: ModCardProps) {
             </div>
           </div>
         </motion.div>
-      </ContextMenu.Trigger>
-
-      <ContextMenu.Portal>
-        <ContextMenu.Content className="min-w-[160px] bg-surface-900 border border-surface-700/50 rounded-lg p-1 shadow-xl animate-in fade-in zoom-in duration-200 z-50">
-          <ContextMenu.Item className="flex items-center gap-2 px-2 py-1.5 text-sm text-surface-200 hover:bg-primary-500/20 hover:text-white rounded cursor-pointer outline-none transition-colors" onClick={() => navigate(`/mod/${mod.id}`)}>
-            <Play className="w-4 h-4" /> View Details
-          </ContextMenu.Item>
-          {mod.isInstalled && (
-            <ContextMenu.Item className="flex items-center gap-2 px-2 py-1.5 text-sm text-red-400 hover:bg-red-500/20 hover:text-red-300 rounded cursor-pointer outline-none transition-colors">
-              <Trash2 className="w-4 h-4" /> Uninstall
-            </ContextMenu.Item>
-          )}
-        </ContextMenu.Content>
-      </ContextMenu.Portal>
-    </ContextMenu.Root>
   );
 }

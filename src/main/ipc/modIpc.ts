@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
 import { getPrisma } from '../managers/PrismaManager';
+import { SettingsManager } from '../managers/SettingsManager';
 import { ModSourceManager } from '../managers/ModSourceManager';
 import { GameBananaSearch } from '../managers/GameBananaSearch';
 import { InstallerManager } from '../managers/InstallerManager';
@@ -12,7 +13,6 @@ import { ExtractionManager } from '../managers/ExtractionManager';
 import { LogManager } from '../managers/LogManager';
 import { asyncFs } from '../asyncFs';
 import { IPC_CHANNELS, STANDALONE_ENGINE_ID } from '../../shared/constants';
-import { ENGINE_CATALOG } from '../../shared/engineTypes';
 
 const GAMEBANANA_CORE_API = 'https://api.gamebanana.com/Core';
 
@@ -84,7 +84,7 @@ function constructDownloadLinkFromModId(modId: string): string | null {
 async function pollDownload(
   downloadId: string,
   prisma: ReturnType<typeof getPrisma>,
-  timeoutMs = 180000,
+  timeoutMs = 300000,
   intervalMs = 2000,
 ): Promise<any> {
   const deadline = Date.now() + timeoutMs;
@@ -145,7 +145,7 @@ export function registerModIpc() {
       include: { mod: true, profile: true },
       orderBy: { createdAt: 'desc' },
     });
-    return installs.map(inst => ({
+    return installs.map((inst: any) => ({
       ...inst.mod,
       installId: inst.id,
       enabled: inst.enabled,
@@ -191,39 +191,73 @@ export function registerModIpc() {
   ipcMain.handle(IPC_CHANNELS.DELETE_MOD, async (_event, id: string) => {
     const prisma = getPrisma();
 
+    const mod = await prisma.mod.findUnique({ where: { id } });
+
+    // 1. Cancel active downloads
     const activeDownloads = await prisma.download.findMany({ where: { modId: id, status: { in: ['pending', 'downloading'] } } });
     for (const dl of activeDownloads) {
       try { await DownloadManager.cancelDownload(dl.id); } catch {}
     }
 
+    // 2. Delete mod source folder (standalone-mods)
+    if (mod) {
+      const standalonePath = path.join(app.getPath('userData'), 'standalone-mods');
+      const modFolderName = sanitizeFolderName(mod.title);
+      const modFolder = path.join(standalonePath, modFolderName);
+      if (await asyncFs.exists(modFolder).catch(() => false)) {
+        try {
+          await asyncFs.rm(modFolder, { recursive: true, force: true });
+        } catch {}
+      }
+    }
+
+    // 3. Delete install folders (engine-linked copies)
     const installs = await prisma.install.findMany({ where: { modId: id }, include: { mod: true } });
     for (const install of installs) {
       const modFolder = InstallerManager.getModFolderPath(install.enginePath, install.mod.title, install.mod.engine);
       if (modFolder && await asyncFs.exists(modFolder).catch(() => false)) {
         try {
           await asyncFs.rm(modFolder, { recursive: true, force: true });
-          LogManager.info('Deleted mod folder', { path: modFolder });
-        } catch (err) {
-          LogManager.error('Failed to delete mod folder', { path: modFolder, error: String(err) });
-        }
-      }
-    }
-
-    const downloads = await prisma.download.findMany({ where: { modId: id } });
-    for (const dl of downloads) {
-      if (dl.filePath && await asyncFs.exists(dl.filePath).catch(() => false)) {
-        try {
-          await asyncFs.rm(dl.filePath, { force: true });
         } catch {}
       }
     }
 
-    // Wrap in a transaction-like flow: order matters so delete installs first, then downloads, then mod
+    // 4. Delete download files
+    const downloads = await prisma.download.findMany({ where: { modId: id } });
+    for (const dl of downloads) {
+      if (dl.filePath && await asyncFs.exists(dl.filePath).catch(() => false)) {
+        try { await asyncFs.rm(dl.filePath, { force: true }); } catch {}
+      }
+    }
+
+    // 5. Delete cover image
+    if (mod?.coverPath) {
+      try { await asyncFs.unlink(mod.coverPath); } catch {}
+    }
+    const coversDir = path.join(app.getPath('userData'), 'covers');
+    const coverFile = path.join(coversDir, `${id}.png`);
+    const coverFileJpg = path.join(coversDir, `${id}.jpg`);
+    const coverFileJpeg = path.join(coversDir, `${id}.jpeg`);
+    const coverFileWebp = path.join(coversDir, `${id}.webp`);
+    for (const f of [coverFile, coverFileJpg, coverFileJpeg, coverFileWebp]) {
+      if (await asyncFs.exists(f).catch(() => false)) {
+        try { await asyncFs.unlink(f); } catch {}
+      }
+    }
+
+    // 6. Delete cache / thumbnails associated with this mod
+    const cacheDir = path.join(app.getPath('userData'), 'cache', 'thumbnails');
+    const thumb = path.join(cacheDir, `${id}.jpg`);
+    if (await asyncFs.exists(thumb).catch(() => false)) {
+      try { await asyncFs.unlink(thumb); } catch {}
+    }
+
+    // 7. Delete database records
     await prisma.install.deleteMany({ where: { modId: id } });
     await prisma.download.deleteMany({ where: { modId: id } });
     await prisma.mod.delete({ where: { id } });
 
-    LogManager.info('Mod fully deleted', { id });
+    LogManager.info('Mod fully deleted — all traces removed', { id });
     return { success: true };
   });
 
@@ -289,6 +323,55 @@ export function registerModIpc() {
       orderBy: { createdAt: 'desc' },
     });
 
+    // If there's no recorded completed download, check the user's download folder for a matching archive
+    if (!download) {
+      try {
+        const settings = await SettingsManager.getAll();
+        const downloadFolder = settings.downloadFolder || path.join(process.env.USERPROFILE || '', 'Downloads', 'FunkLobby');
+        if (await asyncFs.exists(downloadFolder).catch(() => false)) {
+          const files = await asyncFs.readdir(downloadFolder) as string[];
+          const candidates = files.filter(f => {
+            const ext = path.extname(f).toLowerCase();
+            if (!['.zip', '.7z', '.rar'].includes(ext)) return false;
+            const name = f.toLowerCase();
+            const titleMatch = mod.title ? name.includes(mod.title.replace(/[^a-z0-9]/gi, '').toLowerCase()) : false;
+            const idMatch = name.includes(modId.toLowerCase());
+            return titleMatch || idMatch;
+          });
+          if (candidates.length > 0) {
+            // Prefer most recently modified file
+            let best: string | null = null;
+            let bestMtime = 0;
+            for (const c of candidates) {
+              try {
+                const fp = path.join(downloadFolder, c);
+                const st = await asyncFs.stat(fp);
+                const m = st.mtimeMs || st.mtime.getTime();
+                if (m > bestMtime) { bestMtime = m; best = fp; }
+              } catch {}
+            }
+            if (best) {
+              const stat = await asyncFs.stat(best);
+              download = await prisma.download.create({
+                data: {
+                  modId,
+                  url: best,
+                  fileName: path.basename(best),
+                  filePath: best,
+                  totalBytes: stat.size,
+                  downloadedBytes: stat.size,
+                  status: 'completed',
+                },
+              });
+              LogManager.info('Reused existing local archive for install', { modId, path: best });
+            }
+          }
+        }
+      } catch (err) {
+        LogManager.warn('Failed to scan download folder for existing archives', { error: String(err) });
+      }
+    }
+
     if (!download) {
       // Use the download URL we already resolved, or try the fallback methods
       const downloadUrl = resolvedDownloadUrl ||
@@ -327,7 +410,7 @@ export function registerModIpc() {
           await EngineManager.detectEngines();
           engine = await prisma.engine.findFirst({ where: { type: targetEngine } });
         } else {
-          engine = allEngines.find(e => e.type === targetEngine) || null;
+          engine = allEngines.find((e: any) => e.type === targetEngine) || null;
         }
       }
 
@@ -348,10 +431,15 @@ export function registerModIpc() {
             }
           }
         } else {
-          throw new Error(
-            `Engine "${targetEngine}" not found. Install the ${targetEngine} engine in Settings, ` +
-            `or reinstall with a different engine target.`
-          );
+          // Engine not found — fall back to standalone install to avoid blocking the user.
+          LogManager.warn('Engine not found for install, falling back to standalone', { modId, targetEngine });
+          enginePath = path.join(app.getPath('userData'), 'standalone-mods');
+          // Update mod record to mark as standalone target so future installs default to standalone
+          try {
+            await prisma.mod.update({ where: { id: modId }, data: { engine: STANDALONE_ENGINE_ID } });
+          } catch (e) {
+            LogManager.warn('Failed to update mod engine to standalone', { modId, error: String(e) });
+          }
         }
       } else {
         enginePath = engine.installPath;
@@ -546,33 +634,13 @@ export function registerModIpc() {
     const folderPath = result.filePaths[0];
     const folderName = path.basename(folderPath);
 
-    // Read available engines from catalog + DB
-    const engineDirs: Array<{ id: string; name: string }> = [];
-
-    for (const entry of ENGINE_CATALOG) {
-      engineDirs.push({ id: entry.id, name: entry.name });
-    }
-
-    try {
-      const prisma = getPrisma();
-      const dbEngines = await prisma.engine.findMany({ select: { type: true, name: true } });
-      for (const db of dbEngines) {
-        if (!engineDirs.some(e => e.id === db.type)) {
-          engineDirs.push({ id: db.type, name: db.name });
-        }
-      }
-    } catch {}
-
-    // Standalone option
-    engineDirs.push({ id: STANDALONE_ENGINE_ID, name: 'Standalone (No Engine)' });
-
-    return { folderPath, folderName, engines: engineDirs };
+    return { folderPath, folderName, canceled: false };
   });
 
   ipcMain.handle(IPC_CHANNELS.SAVE_LOCAL_MOD, async (_event, params: {
-    name: string; sourceFolder: string; engine: string; enginePath?: string;
+    name: string; sourceFolder: string;
   }) => {
-    const { name, sourceFolder, engine } = params;
+    const { name, sourceFolder } = params;
     if (!name || !sourceFolder) throw new Error('Name and source folder are required');
     if (!await asyncFs.exists(sourceFolder).catch(() => false)) throw new Error('Source folder not found');
 
@@ -590,32 +658,11 @@ export function registerModIpc() {
       });
     }
 
-    const isStandalone = engine === STANDALONE_ENGINE_ID;
+    const standalonePath = path.join(app.getPath('userData'), 'standalone-mods');
+    await asyncFs.ensureDir(standalonePath);
+
     const modFolderName = sanitizeFolderName(name);
-
-    // Determine target path
-    let enginePath: string;
-    if (isStandalone) {
-      enginePath = path.join(app.getPath('userData'), 'standalone-mods');
-    } else {
-      // Look up engine path from DB or use assets fallback
-      const dbEngine = await prisma.engine.findFirst({ where: { type: engine } });
-      if (dbEngine?.installPath) {
-        enginePath = dbEngine.installPath;
-      } else {
-        const assetsPath = path.join(EngineManager.getAssetsEnginesPath(), engine);
-        if (await asyncFs.exists(assetsPath).catch(() => false)) {
-          enginePath = assetsPath;
-        } else {
-          enginePath = params.enginePath || engine;
-        }
-      }
-    }
-
-    const modsFolder = isStandalone ? enginePath : path.join(enginePath, 'mods');
-    await asyncFs.ensureDir(modsFolder);
-
-    const targetPath = path.join(modsFolder, modFolderName);
+    const targetPath = path.join(standalonePath, modFolderName);
 
     // Copy mod folder to target
     try {
@@ -649,7 +696,7 @@ export function registerModIpc() {
         author: 'Imported',
         version: '1.0.0',
         description: 'Local mod imported from ' + sourceFolder,
-        engine: isStandalone ? STANDALONE_ENGINE_ID : engine,
+        engine: STANDALONE_ENGINE_ID,
         sourceType: 'local',
         sourceUrl: sourceFolder,
         category: 'Other',
@@ -675,12 +722,11 @@ export function registerModIpc() {
     });
 
     // Create Install record
-    const resolvedEnginePath = isStandalone ? enginePath : enginePath;
     const install = await prisma.install.create({
       data: {
         modId: mod.id,
         profileId: profile.id,
-        enginePath: resolvedEnginePath,
+        enginePath: standalonePath,
         status: 'installed',
         enabled: true,
         createdAt: new Date().toISOString(),
@@ -692,6 +738,59 @@ export function registerModIpc() {
     return { ...mod, installId: install.id, enabled: true };
   });
 
+  ipcMain.handle(IPC_CHANNELS.GET_INSTALLED_ENGINES, async () => {
+    const prisma = getPrisma();
+    const engines = await prisma.engine.findMany({
+      where: { status: { in: ['installed', 'update_available'] } },
+      select: { id: true, type: true, name: true, installPath: true },
+    });
+    return engines.map((e: any) => ({ id: e.id, type: e.type, name: e.name, installPath: e.installPath }));
+  });
+
+  ipcMain.handle(IPC_CHANNELS.INSTALL_TO_ENGINE, async (_event, params: {
+    modId: string; engineId: string; renameSuffix?: string;
+  }) => {
+    const { modId, engineId } = params;
+    const prisma = getPrisma();
+    const mod = await prisma.mod.findUnique({ where: { id: modId } });
+    if (!mod) throw new Error('Mod not found');
+
+    // Find engine from DB
+    const engine = await prisma.engine.findFirst({ where: { id: engineId } });
+    if (!engine || !engine.installPath) {
+      throw new Error('Engine not found or has no install path');
+    }
+
+    // Source folder (standalone-mods)
+    const standalonePath = path.join(app.getPath('userData'), 'standalone-mods');
+    const sourceFolderName = sanitizeFolderName(mod.title);
+    const sourceFolder = path.join(standalonePath, sourceFolderName);
+    if (!await asyncFs.exists(sourceFolder).catch(() => false)) {
+      throw new Error('Mod source folder not found. Has the mod been imported?');
+    }
+
+    // Target: engine's mods folder
+    const targetDir = path.join(engine.installPath, 'mods');
+    await asyncFs.ensureDir(targetDir);
+
+    let targetPath = path.join(targetDir, sourceFolderName);
+    let suffix = 0;
+    while (await asyncFs.exists(targetPath).catch(() => false)) {
+      suffix++;
+      targetPath = path.join(targetDir, `${sourceFolderName}_${suffix}`);
+    }
+
+    // Copy
+    try {
+      await ExtractionManager.copyDirectoryAsync(sourceFolder, targetPath);
+    } catch (err) {
+      throw new Error(`Failed to copy mod: ${err}`);
+    }
+
+    LogManager.info('Mod installed to engine', { modId, engineId, targetPath });
+    return { success: true, targetPath, renamed: suffix > 0 };
+  });
+
   ipcMain.handle(IPC_CHANNELS.VERIFY_INSTALLATION, async (_event, modId: string) => {
     const prisma = getPrisma();
     const install = await prisma.install.findFirst({ where: { modId } });
@@ -699,6 +798,165 @@ export function registerModIpc() {
     const exists = await InstallerManager.verifyInstallation(install.id);
     return { verified: exists };
   });
+
+  ipcMain.handle(IPC_CHANNELS.SET_COVER, async (_event, modId: string) => {
+    const result = await dialog.showOpenDialog({
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { canceled: true };
+
+    const srcPath = result.filePaths[0];
+    const prisma = getPrisma();
+    const mod = await prisma.mod.findUnique({ where: { id: modId } });
+    if (!mod) throw new Error('Mod not found');
+
+    const coversDir = path.join(app.getPath('userData'), 'covers');
+    await asyncFs.ensureDir(coversDir);
+    const ext = path.extname(srcPath);
+    const destName = `${modId}${ext}`;
+    const destPath = path.join(coversDir, destName);
+    await asyncFs.copyFile(srcPath, destPath);
+
+    const updated = await prisma.mod.update({
+      where: { id: modId },
+      data: { coverPath: destPath, customCover: true },
+    });
+    return updated;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.REMOVE_COVER, async (_event, modId: string) => {
+    const prisma = getPrisma();
+    const mod = await prisma.mod.findUnique({ where: { id: modId } });
+    if (!mod) throw new Error('Mod not found');
+
+    if (mod.coverPath) {
+      try { await asyncFs.unlink(mod.coverPath); } catch {}
+    }
+
+    return await prisma.mod.update({
+      where: { id: modId },
+      data: { coverPath: null, customCover: false },
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GET_COVER_PATH, async (_event, modId: string) => {
+    const prisma = getPrisma();
+    const mod = await prisma.mod.findUnique({ where: { id: modId } });
+    if (!mod || !mod.coverPath) return null;
+    const exists = await asyncFs.exists(mod.coverPath).catch(() => false);
+    return exists ? mod.coverPath : null;
+  });
+
+}
+
+/**
+ * Detect engine type from a mod folder by scanning metadata files.
+ */
+async function detectModEngine(folderPath: string): Promise<string | null> {
+  try {
+    const entries = await asyncFs.readdir(folderPath) as string[];
+
+    if (entries.includes('pack.json')) {
+      try {
+        const content = await asyncFs.readFile(path.join(folderPath, 'pack.json'));
+        const parsed = JSON.parse(content as string);
+        if (parsed.engine) {
+          const engineType = parsed.engine.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const engineMap: Record<string, string> = {
+            'psych': 'psych', 'psychengine': 'psych', 'psych engine': 'psych',
+            'codename': 'codename', 'codenameengine': 'codename',
+            'cdev': 'cdev', 'cdevengine': 'cdev',
+            'yoshie': 'yoshicrafter', 'yoshicrafterengine': 'yoshicrafter',
+            'dragon': 'dragon', 'dragonengine': 'dragon',
+            'shadow': 'shadow', 'shadowengine': 'shadow',
+            'shattered': 'shattered', 'shatteredengine': 'shattered',
+            'slushi': 'slushi', 'slushiengine': 'slushi',
+            'troll': 'troll', 'trollengine': 'troll',
+            'universe': 'universe', 'universeengine': 'universe',
+            'plusengine': 'funkin-plus-plus', 'funkinplusplus': 'funkin-plus-plus',
+          };
+          return engineMap[engineType] || engineType;
+        }
+      } catch {}
+    }
+
+    if (entries.includes('mod.json')) {
+      try {
+        const content = await asyncFs.readFile(path.join(folderPath, 'mod.json'));
+        const parsed = JSON.parse(content as string);
+        if (parsed.engine || parsed.type) {
+          const val = (parsed.engine || parsed.type).toLowerCase();
+          if (val.includes('psych')) return 'psych';
+          if (val.includes('codename')) return 'codename';
+        }
+      } catch {}
+    }
+
+    if (entries.includes('project.xml')) {
+      try {
+        const content = (await asyncFs.readFile(path.join(folderPath, 'project.xml'))) as string;
+        const lower = content.toLowerCase();
+        if (lower.includes('psych')) return 'psych';
+        if (lower.includes('codename')) return 'codename';
+        if (lower.includes('cdev')) return 'cdev';
+        if (lower.includes('yoshie') || lower.includes('yoshi')) return 'yoshicrafter';
+        if (lower.includes('dragon')) return 'dragon';
+        if (lower.includes('shadow')) return 'shadow';
+        if (lower.includes('shattered')) return 'shattered';
+        if (lower.includes('slushi')) return 'slushi';
+        if (lower.includes('troll')) return 'troll';
+        if (lower.includes('universe')) return 'universe';
+        if (lower.includes('plus') || lower.includes('funkin++')) return 'funkin-plus-plus';
+      } catch {}
+    }
+
+    const hxprojFiles = entries.filter(e => e.endsWith('.hxproj') || e.endsWith('.hxp'));
+    if (hxprojFiles.length > 0) {
+      try {
+        const content = (await asyncFs.readFile(path.join(folderPath, hxprojFiles[0]))) as string;
+        const lower = content.toLowerCase();
+        if (lower.includes('psych')) return 'psych';
+        if (lower.includes('codename')) return 'codename';
+      } catch {}
+    }
+
+    if (entries.some(e => e.startsWith('_polymod_'))) {
+      return 'psych';
+    }
+  } catch {}
+  return null;
+}
+
+/**
+ * Validate that an installed engine is actually functional.
+ * Checks executable, install folder, metadata, and version.
+ */
+async function validateInstalledEngine(engineType: string): Promise<boolean> {
+  try {
+    const prisma = getPrisma();
+    const engine = await prisma.engine.findFirst({ where: { type: engineType } });
+    if (!engine) return false;
+    if (engine.status !== 'installed' && engine.status !== 'update_available') return false;
+
+    // Check install path exists
+    if (!engine.installPath) return false;
+    if (!await asyncFs.exists(engine.installPath).catch(() => false)) return false;
+
+    // Check executable exists
+    if (!engine.exePath || !await asyncFs.exists(engine.exePath).catch(() => false)) return false;
+
+    // Check executable has content
+    const stat = await asyncFs.stat(engine.exePath).catch(() => null);
+    if (!stat || stat.size < 1024) return false;
+
+    // Check version metadata
+    if (!engine.version) return false;
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Sanitize a folder name for use on disk */

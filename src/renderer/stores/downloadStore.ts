@@ -24,6 +24,7 @@ interface DownloadState {
   cancelDownload: (id: string) => Promise<void>;
   retryDownload: (id: string) => Promise<void>;
   updateProgress: (data: DownloadProgress) => void;
+  removeActiveDownload: (id: string) => void;
   setQueueVisible: (visible: boolean) => void;
 }
 
@@ -71,6 +72,12 @@ export const useDownloadStore = create<DownloadState>((set, get) => ({
   updateProgress: (data) => {
     const active = get().activeDownloads;
     active.set(data.downloadId || data.modId, data);
+    set({ activeDownloads: new Map(active) });
+  },
+
+  removeActiveDownload: (id: string) => {
+    const active = get().activeDownloads;
+    active.delete(id);
     set({ activeDownloads: new Map(active) });
   },
 

@@ -9,39 +9,41 @@ datasource db {
 }
 
 model Mod {
-  id          String    @id @default(uuid())
-  title       String
-  author      String
-  version     String
-  description String
-  engine      String
-  tags        String
-  category    String
-  homepage    String
-  bannerUrl   String
+  id           String    @id @default(uuid())
+  title        String
+  author       String
+  version      String
+  description  String
+  engine       String
+  tags         String
+  category     String
+  homepage     String
+  bannerUrl    String
   thumbnailUrl String
-  fileSize    Int
+  fileSize     Int
   downloadCount Int    @default(0)
-  sourceUrl   String
-  sourceType  String
-  isInstalled Boolean  @default(false)
-  installedAt String?
-  updatedAt   String   @default("")
-  createdAt   String   @default("")
+  sourceUrl    String
+  sourceType   String
+  isInstalled  Boolean  @default(false)
+  installedAt  String?
+  updatedAt    String   @default("")
+  createdAt    String   @default("")
   dependencies String
   requirements String
-  changelog   String
-  screenshots String
-  videos      String
-  characters  String
-  songs       String
-  difficulty  String
-  isFeatured  Boolean  @default(false)
-  isTrending  Boolean  @default(false)
-  isPopular   Boolean  @default(false)
-  isFavorited Boolean  @default(false)
-  downloads   Download[]
-  installs    Install[]
+  changelog    String
+  screenshots  String
+  videos       String
+  characters   String
+  songs        String
+  difficulty   String
+  isFeatured   Boolean  @default(false)
+  isTrending   Boolean  @default(false)
+  isPopular    Boolean  @default(false)
+  isFavorited  Boolean  @default(false)
+  coverPath    String?
+  customCover  Boolean  @default(false)
+  downloads    Download[]
+  installs     Install[]
 }
 
 model Download {
@@ -109,6 +111,7 @@ model Engine {
   error         String?
   isCustom      Boolean  @default(false)
   isDetected    Boolean  @default(false)
+  importSource  String?
   installedAt   String?
   lastUpdatedAt String?
   backupPath    String?

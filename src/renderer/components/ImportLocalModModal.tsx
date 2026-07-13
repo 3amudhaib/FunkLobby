@@ -1,27 +1,23 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { FolderOpen, Loader2, Check } from 'lucide-react';
+import { FolderOpen, Loader2, Check, X, Image } from 'lucide-react';
+
 import { GlassDialog } from './GlassDialog';
 import { useModStore } from '../stores/modStore';
-
-interface EngineOption {
-  id: string;
-  name: string;
-}
+import { useTranslation } from '../hooks/useTranslation';
 
 interface ImportLocalModModalProps {
   open: boolean;
   onClose: () => void;
 }
-
 export function ImportLocalModModal({ open, onClose }: ImportLocalModModalProps) {
+  const { t } = useTranslation();
   const { fetchLibrary } = useModStore();
   const [step, setStep] = useState<'select' | 'configure' | 'saving' | 'done'>('select');
   const [folderPath, setFolderPath] = useState('');
   const [folderName, setFolderName] = useState('');
-  const [engines, setEngines] = useState<EngineOption[]>([]);
   const [modName, setModName] = useState('');
-  const [selectedEngine, setSelectedEngine] = useState('');
+  const [coverPath, setCoverPath] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -29,10 +25,10 @@ export function ImportLocalModModal({ open, onClose }: ImportLocalModModalProps)
       setStep('select');
       setFolderPath('');
       setFolderName('');
-      setEngines([]);
       setModName('');
-      setSelectedEngine('');
+      setCoverPath('');
       setError('');
+
       selectFolder();
     }
   }, [open]);
@@ -48,40 +44,46 @@ export function ImportLocalModModal({ open, onClose }: ImportLocalModModalProps)
       setFolderPath(result.folderPath);
       setFolderName(result.folderName);
       setModName(result.folderName);
-      setEngines(result.engines);
-      setSelectedEngine(result.engines.length > 0 ? result.engines[0].id : '');
       setStep('configure');
     } catch {
-      setError('Failed to select folder');
+      setError(t('importLocalMod.failed'));
       onClose();
     }
   };
 
+  const selectCover = async () => {
+    const result = await window.electronAPI.selectFile([{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]);
+    if (!result.canceled && result.path) {
+      setCoverPath(result.path);
+    }
+  };
+
   const handleSave = async () => {
-    if (!modName.trim()) { setError('Please enter a mod name'); return; }
-    if (!selectedEngine) { setError('Please select an engine'); return; }
+    if (!modName.trim()) { setError(t('importLocalMod.nameRequired')); return; }
     setError('');
     setStep('saving');
     try {
-      await window.electronAPI.saveLocalMod({
+      const savedMod = await window.electronAPI.saveLocalMod({
         name: modName.trim(),
         sourceFolder: folderPath,
-        engine: selectedEngine,
       });
+      if (coverPath) {
+        try { await window.electronAPI.setCover(savedMod.id); } catch {}
+      }
       await fetchLibrary();
       setStep('done');
     } catch (err: any) {
-      setError(err.message || 'Failed to save mod');
+      setError(err.message || t('importLocalMod.failed'));
       setStep('configure');
     }
   };
 
   return (
-    <GlassDialog open={open} onClose={onClose} title="Import Local Mod" maxWidth="max-w-md">
+    <GlassDialog open={open} onClose={onClose} title={t('importLocalMod.title')} maxWidth="max-w-md">
       {step === 'select' && (
         <div className="flex flex-col items-center py-8 gap-3">
           <Loader2 className="w-8 h-8 text-primary-400 animate-spin" />
-          <p className="text-surface-400 text-sm">Opening folder selector...</p>
+          <p className="text-surface-400 text-sm">{t('importLocalMod.selecting')}</p>
         </div>
       )}
 
@@ -96,40 +98,33 @@ export function ImportLocalModModal({ open, onClose }: ImportLocalModModalProps)
           </div>
 
           <div>
-            <label className="text-xs text-surface-400 mb-1.5 block">Mod Name</label>
+            <label className="text-xs text-surface-400 mb-1.5 block">{t('importLocalMod.modName')}</label>
             <input
               className="input text-sm w-full"
               value={modName}
               onChange={(e) => setModName(e.target.value)}
-              placeholder="Enter a name for this mod"
+              placeholder={t('importLocalMod.namePlaceholder')}
             />
           </div>
 
           <div>
-            <label className="text-xs text-surface-400 mb-1.5 block">Engine</label>
-            <select
-              className="input text-sm w-full"
-              value={selectedEngine}
-              onChange={(e) => setSelectedEngine(e.target.value)}
-            >
-              {engines.map((eng) => (
-                <option key={eng.id} value={eng.id}>{eng.name}</option>
-              ))}
-            </select>
-            <p className="text-xs text-surface-500 mt-1">
-              {selectedEngine === 'standalone'
-                ? 'This mod runs on its own without a base engine.'
-                : 'The FNF engine this mod is built for.'}
-            </p>
+            <label className="text-xs text-surface-400 mb-1.5 block">{t('importLocalMod.coverImage')}</label>
+            <button className="btn-secondary text-sm w-full flex items-center justify-center gap-2" onClick={selectCover}>
+              <Image className="w-4 h-4" />
+              {coverPath ? t('importLocalMod.changeCover') : t('importLocalMod.selectCover')}
+            </button>
+            {coverPath && (
+              <p className="text-xs text-surface-500 mt-1 truncate">{coverPath}</p>
+            )}
           </div>
 
           {error && <p className="text-red-400 text-xs">{error}</p>}
 
           <div className="flex gap-2 pt-2">
-            <button className="btn-secondary flex-1 text-sm" onClick={onClose}>Cancel</button>
+            <button className="btn-secondary flex-1 text-sm" onClick={onClose}>{t('importLocalMod.cancel')}</button>
             <button className="btn-primary flex-1 text-sm" onClick={handleSave}>
               <Check className="w-4 h-4" />
-              Add to Library
+              {t('importLocalMod.addToLibrary')}
             </button>
           </div>
         </div>
@@ -138,7 +133,7 @@ export function ImportLocalModModal({ open, onClose }: ImportLocalModModalProps)
       {step === 'saving' && (
         <div className="flex flex-col items-center py-8 gap-3">
           <Loader2 className="w-8 h-8 text-primary-400 animate-spin" />
-          <p className="text-surface-400 text-sm">Copying mod folder and saving...</p>
+          <p className="text-surface-400 text-sm">{t('importLocalMod.saving')}</p>
         </div>
       )}
 
@@ -147,9 +142,9 @@ export function ImportLocalModModal({ open, onClose }: ImportLocalModModalProps)
           <div className="w-12 h-12 rounded-full bg-emerald-500/20 flex items-center justify-center">
             <Check className="w-6 h-6 text-emerald-400" />
           </div>
-          <p className="text-white font-medium">Mod imported successfully!</p>
-          <p className="text-surface-400 text-sm text-center">{modName} has been added to your library.</p>
-          <button className="btn-primary text-sm mt-2" onClick={onClose}>Done</button>
+          <p className="text-white font-medium">{t('importLocalMod.success')}</p>
+          <p className="text-surface-400 text-sm text-center">{t('importLocalMod.successDesc', { name: modName })}</p>
+          <button className="btn-primary text-sm mt-2" onClick={onClose}>{t('importLocalMod.done')}</button>
         </div>
       )}
     </GlassDialog>

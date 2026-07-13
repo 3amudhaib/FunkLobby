@@ -1,8 +1,9 @@
 import { Filter, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSearchStore } from '../stores/searchStore';
+import { useTranslation } from '../hooks/useTranslation';
 
-const CATEGORIES = ['All', 'Character', 'Song', 'Engine', 'Script', 'UI', 'Audio', 'Mod', 'WIP', 'Other'];
+const CATEGORIES = ['All', 'Character', 'Song', 'Mod', 'Audio', 'UI', 'WIP', 'Other'];
 const SORT_OPTIONS = [
   { id: 'trending', label: 'Trending' },
   { id: 'popular', label: 'Most Downloaded' },
@@ -17,7 +18,7 @@ const ENGINES = [
   { id: 'codename', label: 'Codename Engine' },
   { id: 'forever', label: 'Forever Engine' },
   { id: 'leather', label: 'Leather Engine' },
-  { id: 'vslice', label: 'V-Slice' },
+  { id: 'v-slice', label: 'V-Slice' },
   { id: 'js-engine', label: 'JS Engine' },
   { id: 'fnf-love', label: 'FNF Love' },
   { id: 'fps-plus', label: 'FPS Plus' },
@@ -29,6 +30,7 @@ interface SearchFiltersProps {
 }
 
 export function SearchFilters({ open, onToggle }: SearchFiltersProps) {
+  const { t } = useTranslation();
   const { filters, setFilter } = useSearchStore();
 
   const activeCount = [filters.category !== 'All' ? filters.category : null, filters.engine ? filters.engine : null]
@@ -40,7 +42,7 @@ export function SearchFilters({ open, onToggle }: SearchFiltersProps) {
         className={`btn-ghost text-sm flex items-center gap-2 relative ${open ? 'text-primary-400' : ''}`}
         onClick={onToggle}
       >
-        <Filter className="w-4 h-4" /> Filters
+        <Filter className="w-4 h-4" /> {t('searchFilters.filter')}
         {activeCount > 0 && (
           <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary-500 text-[10px] flex items-center justify-center text-white font-medium">
             {activeCount}
@@ -59,7 +61,7 @@ export function SearchFilters({ open, onToggle }: SearchFiltersProps) {
             <div className="glass rounded-xl p-4 border border-white/[0.06] mt-2">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="text-xs text-surface-400 mb-1.5 block">Category</label>
+                  <label className="text-xs text-surface-400 mb-1.5 block">{t('searchFilters.category')}</label>
                   <select
                     className="input text-sm w-full"
                     value={filters.category}
@@ -72,7 +74,7 @@ export function SearchFilters({ open, onToggle }: SearchFiltersProps) {
                 </div>
 
                 <div>
-                  <label className="text-xs text-surface-400 mb-1.5 block">Engine</label>
+                  <label className="text-xs text-surface-400 mb-1.5 block">{t('searchFilters.engine')}</label>
                   <select
                     className="input text-sm w-full"
                     value={filters.engine}
@@ -85,7 +87,7 @@ export function SearchFilters({ open, onToggle }: SearchFiltersProps) {
                 </div>
 
                 <div>
-                  <label className="text-xs text-surface-400 mb-1.5 block">Sort By</label>
+                  <label className="text-xs text-surface-400 mb-1.5 block">{t('searchFilters.sortBy')}</label>
                   <select
                     className="input text-sm w-full"
                     value={filters.sortBy}
@@ -107,7 +109,7 @@ export function SearchFilters({ open, onToggle }: SearchFiltersProps) {
                     setFilter('sortBy', 'trending');
                   }}
                 >
-                  <X className="w-3 h-3" /> Clear filters
+                  <X className="w-3 h-3" /> {t('searchFilters.clear')}
                 </button>
               )}
             </div>

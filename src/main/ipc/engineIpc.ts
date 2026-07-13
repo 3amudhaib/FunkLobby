@@ -20,7 +20,14 @@ export function registerEngineIpc() {
     return EngineManager.getEngineById(id);
   });
 
+  const installThrottle = new Map<string, number>();
   ipcMain.handle(IPC_CHANNELS.INSTALL_ENGINE, async (_event, engineType: string) => {
+    const lastCall = installThrottle.get(engineType) || 0;
+    const elapsed = Date.now() - lastCall;
+    if (elapsed < 3000) {
+      throw new Error(`Please wait a moment before retrying the installation of ${engineType}.`);
+    }
+    installThrottle.set(engineType, Date.now());
     return EngineManager.installEngine(engineType);
   });
 
@@ -166,5 +173,9 @@ export function registerEngineIpc() {
 
   ipcMain.handle(IPC_CHANNELS.GET_ENGINE_LOGS, async (_event, engineId: string) => {
     return EngineManager.getEngineLogs(engineId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.IMPORT_ENGINE, async () => {
+    return EngineManager.importExternalEngine();
   });
 }

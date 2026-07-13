@@ -60,9 +60,17 @@ export async function initDatabase() {
 }
 
 async function migrateSchema(client: PrismaClient) {
+  const modColumns = ['coverPath', 'customCover'];
+  for (const col of modColumns) {
+    try {
+      const type = col === 'customCover' ? 'INTEGER' : 'TEXT';
+      await client.$executeRawUnsafe(`ALTER TABLE Mod ADD COLUMN ${col} ${type};`);
+    } catch {
+    }
+  }
   const engineColumns = [
     'description', 'author', 'repoUrl', 'websiteUrl', 'downloadUrl',
-    'releaseUrl', 'installPath', 'logoUrl', 'features', 'platforms',
+    'releaseUrl', 'installPath', 'exePath', 'logoUrl', 'features', 'platforms',
     'license', 'status', 'error', 'installedAt', 'lastUpdatedAt', 'backupPath',
   ];
   for (const col of engineColumns) {
@@ -119,7 +127,9 @@ async function pushSchema() {
       isFeatured INTEGER NOT NULL DEFAULT 0,
       isTrending INTEGER NOT NULL DEFAULT 0,
       isPopular INTEGER NOT NULL DEFAULT 0,
-      isFavorited INTEGER NOT NULL DEFAULT 0
+      isFavorited INTEGER NOT NULL DEFAULT 0,
+      coverPath TEXT,
+      customCover INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS Download (
       id TEXT PRIMARY KEY,

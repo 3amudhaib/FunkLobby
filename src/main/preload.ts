@@ -41,11 +41,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onDownloadProgress: (callback: (data: any) => void) => {
     ipcRenderer.on('download:progress', (_event, data) => callback(data));
   },
+  removeDownloadProgressListener: (callback: (data: any) => void) => {
+    ipcRenderer.removeListener('download:progress', callback);
+  },
   onDownloadComplete: (callback: (data: any) => void) => {
     ipcRenderer.on('download:complete', (_event, data) => callback(data));
   },
+  removeDownloadCompleteListener: (callback: (data: any) => void) => {
+    ipcRenderer.removeListener('download:complete', callback);
+  },
   onDownloadError: (callback: (data: any) => void) => {
     ipcRenderer.on('download:error', (_event, data) => callback(data));
+  },
+  removeDownloadErrorListener: (callback: (data: any) => void) => {
+    ipcRenderer.removeListener('download:error', callback);
   },
 
   // Engine operations
@@ -66,6 +75,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createEngineShortcut: (engineId: string) => ipcRenderer.invoke('engines:createShortcut', engineId),
   getEngineImage: (engineType: string) => ipcRenderer.invoke('engines:getImage', engineType),
   getEngineLogs: (engineId: string) => ipcRenderer.invoke('engines:logs', engineId),
+  importExternalEngine: () => ipcRenderer.invoke('engines:importExternal'),
+
+  // Engine install progress events
+  onEngineInstallProgress: (callback: (data: { engineType: string; percent: number; status: string }) => void) => {
+    ipcRenderer.on('engine:installProgress', (_event, data) => callback(data));
+  },
+  removeEngineInstallProgressListener: (callback: (data: any) => void) => {
+    ipcRenderer.removeListener('engine:installProgress', callback);
+  },
 
   // Profile operations
   createProfile: (name: string, description?: string) => ipcRenderer.invoke('profiles:create', name, description),
@@ -98,12 +116,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Local import operations
   selectLocalModFolder: () => ipcRenderer.invoke('mods:selectLocalModFolder'),
-  saveLocalMod: (params: { name: string; sourceFolder: string; engine: string; enginePath?: string }) =>
+  saveLocalMod: (params: { name: string; sourceFolder: string }) =>
     ipcRenderer.invoke('mods:saveLocalMod', params),
+  installToEngine: (params: { modId: string; engineId: string }) =>
+    ipcRenderer.invoke('mods:installToEngine', params),
+  getInstalledEngines: () => ipcRenderer.invoke('mods:getInstalledEngines'),
+
+  // Cover operations
+  setCover: (modId: string) => ipcRenderer.invoke('mods:setCover', modId),
+  removeCover: (modId: string) => ipcRenderer.invoke('mods:removeCover', modId),
+  getCoverPath: (modId: string) => ipcRenderer.invoke('mods:getCoverPath', modId),
 
   // Cache operations
   getCacheSize: () => ipcRenderer.invoke('cache:getSize'),
   clearCache: (type?: 'api' | 'thumbnails' | 'all') => ipcRenderer.invoke('cache:clear', type),
+
+  // Discover operations
+  discoverGetSection: (section: string) => ipcRenderer.invoke('discover:getSection', section),
+  discoverGetRichDetails: (gameBananaId: number) => ipcRenderer.invoke('discover:getRichDetails', gameBananaId),
+  discoverSearch: (params: any) => ipcRenderer.invoke('discover:search', params),
+  discoverDownloadUrl: (gameBananaId: number) => ipcRenderer.invoke('discover:downloadUrl', gameBananaId),
 
   // Update operations
   checkUpdatesApp: (force?: boolean) => ipcRenderer.invoke('update:check', force),

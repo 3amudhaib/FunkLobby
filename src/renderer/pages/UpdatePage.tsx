@@ -2,17 +2,19 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Download, RefreshCw, CheckCircle, AlertCircle,
-  Clock, Package, ArrowUp, RotateCcw,
+  Package, ArrowUp, RotateCcw,
   ChevronDown, ChevronUp, Settings2, Cloud,
 } from 'lucide-react';
 import { useUpdateStore } from '../stores/updateStore';
+import { useTranslation } from '../hooks/useTranslation';
+
 
 export function UpdatePage() {
+  const { t } = useTranslation();
   const {
     status, info, progress, error, channel, autoUpdate,
     checkUpdates, downloadUpdate, installUpdate, setChannel, setAutoUpdate,
   } = useUpdateStore();
-
   const [showNotes, setShowNotes] = useState(false);
   const [channelOpen, setChannelOpen] = useState(false);
 
@@ -29,16 +31,16 @@ export function UpdatePage() {
   const progressSpeed = progress?.bytesPerSecond || 0;
 
   const speedStr = progressSpeed > 1024 * 1024
-    ? `${(progressSpeed / 1024 / 1024).toFixed(1)} MB/s`
+    ? `${(progressSpeed / 1024 / 1024).toFixed(1)} ${t('unit.MB')}/s`
     : progressSpeed > 1024
-    ? `${(progressSpeed / 1024).toFixed(1)} KB/s`
-    : `${progressSpeed} B/s`;
+    ? `${(progressSpeed / 1024).toFixed(1)} ${t('unit.KB')}/s`
+    : `${progressSpeed} ${t('unit.B')}/s`;
 
   const sizeStr = (bytes: number) => {
-    if (bytes > 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-    if (bytes > 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-    if (bytes > 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${bytes} B`;
+    if (bytes > 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} ${t('unit.GB')}`;
+    if (bytes > 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} ${t('unit.MB')}`;
+    if (bytes > 1024) return `${(bytes / 1024).toFixed(1)} ${t('unit.KB')}`;
+    return `${bytes} ${t('unit.B')}`;
   };
 
   return (
@@ -46,8 +48,8 @@ export function UpdatePage() {
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white">Updates</h1>
-            <p className="text-surface-400 text-sm mt-1">Manage application updates</p>
+<h1 className="text-2xl font-bold text-white">{t('updates.title')}</h1>
+             <p className="text-surface-400 text-sm mt-1">{t('updates.subtitle')}</p>
           </div>
           <button
             className="btn-secondary text-sm"
@@ -55,7 +57,7 @@ export function UpdatePage() {
             disabled={isLoading}
           >
             <RefreshCw className={`w-3.5 h-3.5 inline mr-1.5 ${isChecking ? 'animate-spin' : ''}`} />
-            {isChecking ? 'Checking...' : 'Check for Updates'}
+            {isChecking ? t('updates.checking') : t('updates.check')}
           </button>
         </div>
 
@@ -64,17 +66,17 @@ export function UpdatePage() {
             <div className="card p-5">
               <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
                 <Package className="w-4 h-4 text-primary-400" />
-                Version Status
+                {t('updates.title')}
               </h2>
 
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div className="p-3 rounded-lg bg-surface-800/50">
-                  <p className="text-[11px] text-surface-400 uppercase tracking-wider mb-1">Current Version</p>
-                  <p className="text-lg font-bold text-white">{info?.currentVersion || '—'}</p>
+                    <p className="text-[11px] text-surface-400 uppercase tracking-wider mb-1">{t('updates.current')}</p>
+                  <p className="text-lg font-bold text-white">{info?.currentVersion || t('updates.dash')}</p>
                 </div>
                 <div className="p-3 rounded-lg bg-surface-800/50">
-                  <p className="text-[11px] text-surface-400 uppercase tracking-wider mb-1">Latest Version</p>
-                  <p className="text-lg font-bold text-white">{info?.latestVersion || '—'}</p>
+                    <p className="text-[11px] text-surface-400 uppercase tracking-wider mb-1">{t('updates.latest')}</p>
+                  <p className="text-lg font-bold text-white">{info?.latestVersion || t('updates.dash')}</p>
                 </div>
               </div>
 
@@ -84,37 +86,37 @@ export function UpdatePage() {
                     {status === 'up_to_date' && (
                       <>
                         <CheckCircle className="w-4 h-4 text-emerald-400" />
-                        <span className="text-sm text-emerald-400 font-medium">FunkLobby is up to date</span>
+                        <span className="text-sm text-emerald-400 font-medium">{t('updates.upToDate')}</span>
                       </>
                     )}
                     {status === 'available' && (
                       <>
                         <ArrowUp className="w-4 h-4 text-primary-400" />
                         <span className="text-sm text-primary-400 font-medium">
-                          Update available: {info?.currentVersion} → {info?.latestVersion}
+                          {t('updates.available', { current: info?.currentVersion || '—', latest: info?.latestVersion || '—' })}
                         </span>
                       </>
                     )}
                     {status === 'downloaded' && (
                       <>
                         <Download className="w-4 h-4 text-emerald-400" />
-                        <span className="text-sm text-emerald-400 font-medium">Update downloaded. Ready to install.</span>
+                        <span className="text-sm text-emerald-400 font-medium">{t('updates.installUpdate')}</span>
                       </>
                     )}
                     {status === 'downloading' && (
-                      <span className="text-sm text-primary-400 font-medium">Downloading update...</span>
+                      <span className="text-sm text-primary-400 font-medium">{t('updates.downloadUpdate')}</span>
                     )}
                     {status === 'installing' && (
-                      <span className="text-sm text-amber-400 font-medium">Installing update...</span>
+                      <span className="text-sm text-amber-400 font-medium">{t('updates.installing')}</span>
                     )}
                     {status === 'error' && (
                       <>
                         <AlertCircle className="w-4 h-4 text-red-400" />
-                        <span className="text-sm text-red-400 font-medium">{error || 'Update failed'}</span>
+                        <span className="text-sm text-red-400 font-medium">{error || t('updates.installUpdate')}</span>
                       </>
                     )}
                     {status === 'idle' && (
-                      <span className="text-sm text-surface-400">Click "Check for Updates"</span>
+                      <span className="text-sm text-surface-400">{t('updates.check')}</span>
                     )}
                   </div>
                   {info?.releaseUrl && status !== 'idle' && (
@@ -124,7 +126,7 @@ export function UpdatePage() {
                       rel="noopener noreferrer"
                       className="text-[11px] text-primary-400 hover:text-primary-300"
                     >
-                      View on GitHub ↗
+                      {t('updates.viewOnGithub')}
                     </a>
                   )}
                 </div>
@@ -154,7 +156,7 @@ export function UpdatePage() {
                     disabled={isLoading}
                   >
                     <Download className="w-3 h-3 inline mr-1" />
-                    {isLoading ? 'Downloading...' : 'Download Update'}
+                    {isLoading ? t('updates.downloading') : t('updates.download')}
                   </button>
                 )}
                 {status === 'downloaded' && (
@@ -164,7 +166,7 @@ export function UpdatePage() {
                     disabled={isLoading}
                   >
                     <RotateCcw className="w-3 h-3 inline mr-1" />
-                    {isInstalling ? 'Installing...' : 'Install & Restart'}
+                    {isInstalling ? t('updates.installing') : t('updates.installUpdate')}
                   </button>
                 )}
                 <button
@@ -173,7 +175,7 @@ export function UpdatePage() {
                   disabled={isLoading}
                 >
                   <RefreshCw className={`w-3 h-3 inline mr-1 ${isChecking ? 'animate-spin' : ''}`} />
-                  Check Again
+                  {t('updates.check')}
                 </button>
               </div>
             </div>
@@ -186,7 +188,7 @@ export function UpdatePage() {
                 >
                   <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                     <ChevronDown className="w-4 h-4 text-primary-400" />
-                    Release Notes
+                    {t('updates.changelog')}
                   </h2>
                   {showNotes ? <ChevronUp className="w-4 h-4 text-surface-400" /> : <ChevronDown className="w-4 h-4 text-surface-400" />}
                 </button>
@@ -207,15 +209,15 @@ export function UpdatePage() {
             <div className="card p-5">
               <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
                 <Settings2 className="w-4 h-4 text-primary-400" />
-                Update Settings
+                {t('updates.title')}
               </h2>
 
               <div className="space-y-4">
                 <div>
                   <label className="flex items-center justify-between cursor-pointer">
                     <div>
-                      <p className="text-sm text-white">Automatic Updates</p>
-                      <p className="text-[11px] text-surface-400">Check and download on startup</p>
+                      <p className="text-sm text-white">{t('updates.autoUpdate')}</p>
+                      <p className="text-[11px] text-surface-400">{t('updates.autoUpdateDesc')}</p>
                     </div>
                     <button
                       className={`relative w-10 h-5 rounded-full transition-colors ${autoUpdate ? 'bg-primary-500' : 'bg-surface-600'}`}
@@ -227,7 +229,7 @@ export function UpdatePage() {
                 </div>
 
                 <div>
-                  <label className="text-sm text-white block mb-2">Update Channel</label>
+                  <label className="text-sm text-white block mb-2">{t('updates.updateChannel')}</label>
                   <div className="relative">
                     <button
                       className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-surface-800 text-sm text-white border border-surface-700/50"
@@ -246,7 +248,7 @@ export function UpdatePage() {
                           >
                             <span className="capitalize font-medium">{c}</span>
                             <p className="text-[10px] text-surface-500 mt-0.5">
-                              {c === 'stable' ? 'Stable releases only' : 'Pre-release versions included'}
+                              {c === 'stable' ? t('updates.stableDesc') : t('updates.betaDesc')}
                             </p>
                           </button>
                         ))}
@@ -260,12 +262,12 @@ export function UpdatePage() {
             <div className="card p-5">
               <h2 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
                 <Cloud className="w-4 h-4 text-primary-400" />
-                Update Info
+                {t('updates.title')}
               </h2>
               <div className="text-[11px] text-surface-400 space-y-2">
-                <p>Downloads are verified with SHA-256 checksums.</p>
-                <p>Existing version is backed up before installation.</p>
-                <p>Automatic rollback on failure — user data is never touched.</p>
+                <p>{t('updates.security')}</p>
+                <p>{t('updates.backupInfo')}</p>
+                <p>{t('updates.rollbackInfo')}</p>
               </div>
             </div>
           </div>

@@ -6,9 +6,12 @@ import { SearchFilters } from '../components/SearchFilters';
 import { SearchResultCard } from '../components/SearchResultCard';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { useSearchStore } from '../stores/searchStore';
+
 import { useModStore } from '../stores/modStore';
+import { useTranslation } from '../hooks/useTranslation';
 
 export function DiscoverPage() {
+  const { t } = useTranslation();
   const {
     query, results, total, hasMore, loading, error, offline,
     filters, focusedIndex,
@@ -78,11 +81,9 @@ export function DiscoverPage() {
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white">Discover Mods</h1>
+            <h1 className="text-2xl font-bold text-white">{t('discover.title')}</h1>
             <p className="text-surface-400 text-sm mt-1">
-              {searchInitiated.current
-                ? `${total} mods found`
-                : 'Find and download new mods from GameBanana'}
+              {searchInitiated.current ? t('discover.searching') : t('discover.subtitle')}
             </p>
           </div>
         </div>
@@ -92,7 +93,7 @@ export function DiscoverPage() {
             value={query}
             onChange={setQuery}
             onKeyNav={handleKeyNav}
-            placeholder="Search Friday Night Funkin' mods..."
+                placeholder={t('search.placeholder')}
             className="flex-1 max-w-xl"
             loading={loading}
             autoFocus
@@ -105,7 +106,7 @@ export function DiscoverPage() {
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
             <span className="flex-1">{error}</span>
             <button className="btn-ghost text-xs text-red-400 hover:text-red-300" onClick={doSearch}>
-              <RotateCcw className="w-3 h-3" /> Retry
+              <RotateCcw className="w-3 h-3" /> {t('discover.retry')}
             </button>
           </div>
         )}
@@ -113,9 +114,9 @@ export function DiscoverPage() {
         {offline && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm mb-4">
             <WifiOff className="w-4 h-4 flex-shrink-0" />
-            <span className="flex-1">Connection lost. Showing cached results.</span>
+            <span className="flex-1">{t('discover.offline')}</span>
             <button className="btn-ghost text-xs text-amber-400 hover:text-amber-300" onClick={doSearch}>
-              <RotateCcw className="w-3 h-3" /> Retry
+              <RotateCcw className="w-3 h-3" /> {t('discover.retry')}
             </button>
           </div>
         )}
@@ -125,10 +126,9 @@ export function DiscoverPage() {
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500/20 to-surface-800 flex items-center justify-center mb-4">
               <Compass className="w-8 h-8 text-primary-400" />
             </div>
-            <h2 className="text-lg font-medium text-white mb-2">Search FNF Mods</h2>
+            <h2 className="text-lg font-medium text-white mb-2">{t('discover.welcome')}</h2>
             <p className="text-surface-400 text-sm max-w-md">
-              Type in the search bar above to find Friday Night Funkin' mods from GameBanana.
-              Supports partial matches, full names, and more.
+              {t('discover.subtitle')}
             </p>
           </div>
         ) : loading && results.length === 0 ? (
@@ -136,15 +136,13 @@ export function DiscoverPage() {
         ) : results.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Compass className="w-12 h-12 text-surface-600 mb-3" />
-            <h2 className="text-lg font-medium text-white mb-1">No results found</h2>
+            <h2 className="text-lg font-medium text-white mb-1">{t('discover.noResults')}{query ? t('discover.noResultsFor', { query }) : ''}</h2>
             <p className="text-surface-400 text-sm max-w-md">
-              {query
-                ? `No mods match "${query}". Try a different search term or check your spelling.`
-                : 'No mods available yet.'}
+              {t('discover.adjustFilters')}
             </p>
             {query && (
               <button className="btn-secondary text-sm mt-4" onClick={() => setQuery('')}>
-                Clear search
+                {t('discover.reset')}
               </button>
             )}
           </div>
@@ -169,14 +167,14 @@ export function DiscoverPage() {
               <div ref={sentinelRef} className="flex items-center justify-center py-4">
                 <div className="flex items-center gap-2 text-surface-500 text-sm">
                   <ChevronDown className="w-4 h-4" />
-                  Scroll for more
+                  {t('discover.loadMore')}
                 </div>
               </div>
             )}
 
             {!hasMore && results.length > 0 && (
               <p className="text-center text-surface-500 text-xs py-4">
-                {results.length >= 30 ? `Showing ${results.length} of ${total} results` : `${results.length} results`}
+                {results.length >= 30 ? t('discover.resultsOf', { count: results.length, total }) : t('discover.results', { count: results.length })}
               </p>
             )}
           </div>

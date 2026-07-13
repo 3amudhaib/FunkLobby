@@ -3,28 +3,32 @@ import { motion } from 'framer-motion';
 import {
   Download, Play, RefreshCw, Wrench, Trash2,
   FolderOpen, ExternalLink, CheckCircle, AlertCircle,
-  Clock, FileText, Monitor, Shield, ImageOff,
+  Monitor, Shield,
 } from 'lucide-react';
 import { useEngineStore } from '../stores/engineStore';
 import { LoadingSpinner } from '../components/LoadingSpinner';
+import { EngineBanner } from '../components/EngineBanner';
+import { useTranslation } from '../hooks/useTranslation';
 
 type Tab = 'all' | 'installed' | 'updates';
 
-const METHOD_LABELS: Record<string, { label: string; color: string }> = {
-  binary: { label: 'Auto-Install', color: 'text-emerald-400 bg-emerald-500/10' },
-  source_only: { label: 'Source Only', color: 'text-amber-400 bg-amber-500/10' },
-  manual: { label: 'Manual', color: 'text-surface-400 bg-surface-700' },
-  direct_download: { label: 'Direct DL', color: 'text-primary-400 bg-primary-500/10' },
-  unknown_repo: { label: 'No Repo', color: 'text-red-400 bg-red-500/10' },
-  no_releases: { label: 'No Releases', color: 'text-red-400 bg-red-500/10' },
-};
-
 export function EnginesPage() {
+  const { t } = useTranslation();
+
+  const METHOD_LABELS: Record<string, { label: string; color: string }> = {
+    binary: { label: t('engines.autoInstall'), color: 'text-emerald-400 bg-emerald-500/10' },
+    source_only: { label: t('engines.sourceOnly'), color: 'text-amber-400 bg-amber-500/10' },
+    manual: { label: t('engines.manual'), color: 'text-surface-400 bg-surface-700' },
+    direct_download: { label: t('engines.directDl'), color: 'text-primary-400 bg-primary-500/10' },
+    unknown_repo: { label: t('engines.noRepo'), color: 'text-red-400 bg-red-500/10' },
+    no_releases: { label: t('engines.noReleases'), color: 'text-red-400 bg-red-500/10' },
+  };
   const {
-    engines, catalog, imageUrls, loading,
-    fetchEngines, fetchCatalog, fetchEngineImage, installEngine, uninstallEngine,
+    engines, catalog, loading,
+    fetchEngines, fetchCatalog, installEngine, uninstallEngine,
     launchEngine, detectEngines, checkUpdates, updateEngine,
     repairEngine, verifyEngine, createShortcut, openFolder,
+    importExternalEngine,
   } = useEngineStore();
 
   const [tab, setTab] = useState<Tab>('all');
@@ -37,14 +41,6 @@ export function EnginesPage() {
     fetchCatalog();
   }, []);
 
-  useEffect(() => {
-    catalog.forEach((e: any) => {
-      if (!(e.id in imageUrls)) {
-        fetchEngineImage(e.id);
-      }
-    });
-  }, [catalog]);
-
   const getEngineStatus = useCallback((engineType: string) => {
     return engines.find(e => e.type === engineType);
   }, [engines]);
@@ -55,8 +51,9 @@ export function EnginesPage() {
       await installEngine(engineType);
       setActionStates(prev => ({ ...prev, [engineType]: 'installed' }));
       setTimeout(() => setActionStates(prev => ({ ...prev, [engineType]: '' })), 3000);
-    } catch {
-      setActionStates(prev => ({ ...prev, [engineType]: 'error' }));
+    } catch (err: any) {
+      setActionStates(prev => ({ ...prev, [engineType]: err.message || 'error' }));
+      setTimeout(() => setActionStates(prev => ({ ...prev, [engineType]: '' })), 8000);
     }
   };
 
@@ -64,7 +61,7 @@ export function EnginesPage() {
     try {
       const result = await launchEngine(id) as any;
       if (result && result.success === false) {
-        alert(`Engine failed to launch (exit code: ${result.exitCode ?? 'unknown'}). The installation may be broken. Try repairing.`);
+        alert(t('engines.launchFailed'));
       }
     } catch (err: any) {
       alert(err.message);
@@ -72,7 +69,7 @@ export function EnginesPage() {
   };
 
   const handleUninstall = async (id: string) => {
-    if (!confirm('Uninstall this engine?')) return;
+    if (!confirm(t('engines.uninstallConfirm'))) return;
     try {
       await uninstallEngine(id);
     } catch { /* ignore */ }
@@ -124,7 +121,21 @@ export function EnginesPage() {
     setActionStates(prev => ({ ...prev, detect: '' }));
   };
 
+  const handleImport = async () => {
+    try {
+      const result = await importExternalEngine();
+      if (result) {
+        await fetchEngines();
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   const installedEngines = engines.filter(e => e.status === 'installed' || e.status === 'update_available' || e.status === 'broken_installation');
+  const importedEngines = engines.filter(e => e.isCustom);
+  const officialCatalogEngines = engines.filter(e => !e.isCustom);
+
   const sortedCatalog = [...catalog].sort((a, b) => {
     const aInst = getEngineStatus(a.id);
     const bInst = getEngineStatus(b.id);
@@ -147,34 +158,43 @@ export function EnginesPage() {
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white">Engine Library</h1>
+            <h1 className="text-2xl font-bold text-white">{t('engines.title')}</h1>
             <p className="text-surface-400 text-sm mt-1">
-              {installedEngines.length} of {catalog.length} engines installed
+              {t('engines.subtitle', { installed: installedEngines.length, total: catalog.length })}
             </p>
           </div>
-          <button
-            className="btn-secondary text-sm"
-            onClick={handleDetect}
-            disabled={actionStates.detect === 'detecting'}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 inline mr-1.5 ${actionStates.detect === 'detecting' ? 'animate-spin' : ''}`} />
-            {actionStates.detect === 'detecting' ? 'Scanning...' : 'Auto-Detect'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="btn-secondary text-sm"
+              onClick={handleImport}
+            >
+              <Download className="w-3.5 h-3.5 inline mr-1.5" />
+              {t('engines.importEngine')}
+            </button>
+            <button
+              className="btn-secondary text-sm"
+              onClick={handleDetect}
+              disabled={actionStates.detect === 'detecting'}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 inline mr-1.5 ${actionStates.detect === 'detecting' ? 'animate-spin' : ''}`} />
+              {t('engines.autoDetect')}
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-2 mb-6">
-          {(['all', 'installed', 'updates'] as Tab[]).map(t => (
+          {(['all', 'installed', 'updates'] as Tab[]).map(tabName => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
+              key={tabName}
+              onClick={() => setTab(tabName)}
               className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                tab === t
+                tab === tabName
                   ? 'bg-primary-500/20 text-primary-300 border border-primary-500/30'
                   : 'text-surface-400 hover:text-white hover:bg-surface-800'
               }`}
             >
-              {t === 'all' ? 'All Engines' : t === 'installed' ? 'Installed' : 'Updates'}
-              {t === 'updates' && Object.values(updateInfos).filter((i: any) => i?.updateAvailable).length > 0 && (
+              {tabName === 'all' ? t('engines.all') : tabName === 'installed' ? t('engines.installed') : t('engines.updates')}
+              {tabName === 'updates' && Object.values(updateInfos).filter((i: any) => i?.updateAvailable).length > 0 && (
                 <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-primary-500 text-white rounded-full">
                   {Object.values(updateInfos).filter((i: any) => i?.updateAvailable).length}
                 </span>
@@ -183,252 +203,356 @@ export function EnginesPage() {
           ))}
         </div>
 
-        {displayEngines.length === 0 ? (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <LoadingSpinner className="w-8 h-8 text-primary-400 mb-3" />
+            <p className="text-surface-400 text-sm">{t('engines.loading')}</p>
+          </div>
+        ) : displayEngines.length === 0 && tab !== 'all' ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Monitor className="w-12 h-12 text-surface-600 mb-3" />
             <h2 className="text-lg font-medium text-white mb-1">
-              {tab === 'installed' ? 'No engines installed' : tab === 'updates' ? 'All engines up to date' : 'No engines found'}
+              {t('engines.empty')}
             </h2>
             <p className="text-surface-400 text-sm max-w-md">
-              {tab === 'installed'
-                ? 'Install an engine from the catalog below, or click Auto-Detect to scan your system.'
-                : 'All installed engines are on their latest version.'}
+              {t('engines.emptyHint')}
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {displayEngines.map((entry: any) => {
-              const installed = getEngineStatus(entry.id);
-              const updateInfo = updateInfos[entry.id];
-              const verifyResult = verifications[entry.id];
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {displayEngines.map((entry: any) => {
+                const installed = getEngineStatus(entry.id);
+                const updateInfo = updateInfos[entry.id];
+                const verifyResult = verifications[entry.id];
 
-              return (
-                <motion.div
-                  key={entry.id}
-                  layout
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="card p-4 flex flex-col gap-3"
-                >
-                  {imageUrls[entry.id] && (
-                    <div className="relative -mx-4 -mt-4 mb-2 overflow-hidden" style={{ height: 128 }}>
-                      <img
-                        src={imageUrls[entry.id]!}
-                        alt={entry.name}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
-                      />
-                    </div>
-                  )}
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-white font-semibold text-sm truncate">{entry.name}</h3>
-                      <p className="text-surface-400 text-xs mt-0.5 line-clamp-2">{entry.description}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1.5 flex-shrink-0 ml-2">
-                      {entry.installMethod && METHOD_LABELS[entry.installMethod] && (
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full ${METHOD_LABELS[entry.installMethod].color}`}>
-                          {METHOD_LABELS[entry.installMethod].label}
-                        </span>
-                      )}
-                      {(() => {
-                        const s = installed?.status;
-                        if (s === 'installed' || s === 'update_available') {
-                          return (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-emerald-400 bg-emerald-500/10 rounded-full">
-                              <CheckCircle className="w-3 h-3" />
-                              {(installed?.version) || 'Installed'}
-                            </span>
-                          );
-                        }
-                        if (s === 'downloading' || s === 'installing' || actionStates[entry.id] === 'installing') {
-                          return (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-primary-400 bg-primary-500/10 rounded-full">
-                              <LoadingSpinner className="w-3 h-3" />
-                              {s === 'downloading' ? 'Downloading...' : 'Installing...'}
-                            </span>
-                          );
-                        }
-                        if (s === 'corrupted' || s === 'broken_installation') {
-                          return (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-amber-400 bg-amber-500/10 rounded-full">
-                              <AlertCircle className="w-3 h-3" />
-                              {s === 'broken_installation' ? 'Broken' : 'Corrupted'}
-                            </span>
-                          );
-                        }
-                        if (s === 'download_failed') {
-                          return (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-red-400 bg-red-500/10 rounded-full">
-                              <AlertCircle className="w-3 h-3" />
-                              Failed
-                            </span>
-                          );
-                        }
-                        if (s === 'not_installed') {
+                return (
+                  <motion.div
+                    key={entry.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="card p-5 flex flex-col gap-2 h-full hover:-translate-y-1 hover:shadow-xl hover:shadow-black/30"
+                  >
+                    <EngineBanner
+                      engineName={entry.name}
+                      height={90}
+                      className="-mx-5"
+                    />
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-white font-semibold text-sm truncate">{entry.name}</h3>
+                        <p className="text-surface-400 text-xs mt-1 line-clamp-3 leading-relaxed">{entry.description}</p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5 flex-shrink-0 ml-2">
+                        {entry.isCustom && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-violet-400 bg-violet-500/10 rounded-full">
+                            {t('engines.imported')}
+                          </span>
+                        )}
+                        {entry.installMethod && METHOD_LABELS[entry.installMethod] && (
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full ${METHOD_LABELS[entry.installMethod].color}`}>
+                            {METHOD_LABELS[entry.installMethod].label}
+                          </span>
+                        )}
+                        {(() => {
+                          const s = installed?.status;
+                          if (s === 'installed' || s === 'update_available') {
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-emerald-400 bg-emerald-500/10 rounded-full">
+                                <CheckCircle className="w-3 h-3" />
+                                {installed?.version || t('engines.installed')}
+                              </span>
+                            );
+                          }
+                          if (s === 'downloading' || s === 'installing' || actionStates[entry.id] === 'installing') {
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-primary-400 bg-primary-500/10 rounded-full">
+                                <LoadingSpinner className="w-3 h-3" />
+                                {s === 'downloading' ? t('engines.downloading') : t('engines.installing')}
+                              </span>
+                            );
+                          }
+                          if (s === 'corrupted' || s === 'broken_installation') {
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-amber-400 bg-amber-500/10 rounded-full">
+                                <AlertCircle className="w-3 h-3" />
+                                {t('engines.error')}
+                              </span>
+                            );
+                          }
+                          if (s === 'download_failed') {
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-red-400 bg-red-500/10 rounded-full">
+                                <AlertCircle className="w-3 h-3" />
+                                {t('engines.error')}
+                              </span>
+                            );
+                          }
+                          if (s === 'not_installed') {
+                            return null;
+                          }
                           return null;
-                        }
-                        return null;
-                      })()}
+                        })()}
+                      </div>
                     </div>
-                  </div>
 
-                  {entry.features && (
-                    <div className="flex flex-wrap gap-1">
-                      {(Array.isArray(entry.features) ? entry.features : []).slice(0, 4).map((f: string) => (
-                        <span key={f} className="px-1.5 py-0.5 text-[10px] bg-surface-800 text-surface-400 rounded">
-                          {f}
-                        </span>
-                      ))}
-                      {(Array.isArray(entry.features) ? entry.features : []).length > 4 && (
-                        <span className="px-1.5 py-0.5 text-[10px] bg-surface-800 text-surface-500 rounded">
-                          +{(Array.isArray(entry.features) ? entry.features : []).length - 4}
-                        </span>
+                    {entry.features && (
+                      <div className="flex flex-wrap gap-1">
+                        {(Array.isArray(entry.features) ? entry.features : []).slice(0, 4).map((f: string) => (
+                          <span key={f} className="px-1.5 py-0.5 text-[10px] bg-surface-800 text-surface-400 rounded">
+                            {f}
+                          </span>
+                        ))}
+                        {(Array.isArray(entry.features) ? entry.features : []).length > 4 && (
+                          <span className="px-1.5 py-0.5 text-[10px] bg-surface-800 text-surface-500 rounded">
+                            +{(Array.isArray(entry.features) ? entry.features : []).length - 4}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 text-[10px] text-surface-500">
+                      {entry.repoUrl && (
+                        <a
+                          href={entry.repoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 hover:text-primary-400 transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          {t('engines.github')}
+                        </a>
+                      )}
+                      {entry.websiteUrl && (
+                        <a
+                          href={entry.websiteUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 hover:text-primary-400 transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          {t('engines.website')}
+                        </a>
+                      )}
+                      {entry.license && (
+                        <span>{entry.license}</span>
                       )}
                     </div>
-                  )}
 
-                  <div className="flex items-center gap-2 text-[10px] text-surface-500">
-                    {entry.repoUrl && (
-                      <a
-                        href={entry.repoUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 hover:text-primary-400 transition-colors"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        GitHub
-                      </a>
+                    {installed?.error && (
+                      <div className="flex items-center gap-1.5 p-2 rounded bg-red-500/10 text-red-400 text-[11px]">
+                        <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                        {installed.error}
+                      </div>
                     )}
-                    {entry.websiteUrl && (
-                      <a
-                        href={entry.websiteUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 hover:text-primary-400 transition-colors"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        Website
-                      </a>
+
+                    {actionStates[entry.id] && actionStates[entry.id] !== 'installing' && actionStates[entry.id] !== 'installed' && actionStates[entry.id] !== 'error' && actionStates[entry.id] !== '' && (
+                      <div className="flex items-center gap-1.5 p-2 rounded bg-red-500/10 text-red-400 text-[11px]">
+                        <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                        {actionStates[entry.id]}
+                      </div>
                     )}
-                    {entry.license && (
-                      <span>{entry.license}</span>
+
+                    {!installed && !entry.supported && entry.installDisabledReason && (
+                      <div className="flex items-center gap-1.5 p-2 rounded bg-surface-800 text-surface-400 text-[11px]">
+                        <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                        {entry.installDisabledReason}
+                      </div>
                     )}
-                  </div>
 
-                  {installed?.error && (
-                    <div className="flex items-center gap-1.5 p-2 rounded bg-red-500/10 text-red-400 text-[11px]">
-                      <AlertCircle className="w-3 h-3 flex-shrink-0" />
-                      {installed.error}
-                    </div>
-                  )}
+                    {updateInfo && updateInfo.updateAvailable && (
+                      <div className="flex items-center gap-1.5 p-2 rounded bg-primary-500/10 text-primary-300 text-[11px]">
+                        <RefreshCw className="w-3 h-3 flex-shrink-0" />
+                        {t('engines.updateAvailable', { current: updateInfo.currentVersion, latest: updateInfo.latestVersion })}
+                      </div>
+                    )}
 
-                  {!installed && !entry.supported && entry.installDisabledReason && (
-                    <div className="flex items-center gap-1.5 p-2 rounded bg-surface-800 text-surface-400 text-[11px]">
-                      <AlertCircle className="w-3 h-3 flex-shrink-0" />
-                      {entry.installDisabledReason}
-                    </div>
-                  )}
+                    {verifyResult && !verifyResult.verified && (
+                      <div className="flex items-center gap-1.5 p-2 rounded bg-amber-500/10 text-amber-400 text-[11px]">
+                        <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                        {verifyResult.issues[0] || t('engines.verificationFailed')}
+                      </div>
+                    )}
 
-                  {updateInfo && updateInfo.updateAvailable && (
-                    <div className="flex items-center gap-1.5 p-2 rounded bg-primary-500/10 text-primary-300 text-[11px]">
-                      <RefreshCw className="w-3 h-3 flex-shrink-0" />
-                      Update available: v{updateInfo.currentVersion} v{updateInfo.latestVersion}
-                    </div>
-                  )}
-
-                  {verifyResult && !verifyResult.verified && (
-                    <div className="flex items-center gap-1.5 p-2 rounded bg-amber-500/10 text-amber-400 text-[11px]">
-                      <AlertCircle className="w-3 h-3 flex-shrink-0" />
-                      {verifyResult.issues[0] || 'Verification failed'}
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap gap-1.5 mt-auto pt-1">
-                    {!installed || installed.status === 'not_installed' || installed.status === 'download_failed' ? (
-                      <button
-                        className={`text-xs flex-1 ${!entry.supported ? 'btn-disabled' : 'btn-primary'}`}
-                        onClick={() => handleInstall(entry.id)}
-                        disabled={!entry.supported || actionStates[entry.id] === 'installing'}
-                      >
-                        <Download className="w-3 h-3 inline mr-1" />
-                        {actionStates[entry.id] === 'installing' ? 'Installing...' : installed?.status === 'download_failed' ? 'Retry' : 'Install'}
-                      </button>
-                    ) : (
-                      <>
-                        {(installed.status === 'installed' || installed.status === 'update_available' || installed.status === 'broken_installation') && (
+                    <div className="flex flex-wrap gap-2 mt-auto pt-2">
+                      {!installed || installed.status === 'not_installed' || installed.status === 'download_failed' ? (
+                        <button
+                          className={`text-xs flex-1 ${!entry.supported ? 'btn-disabled' : 'btn-primary'}`}
+                          onClick={() => handleInstall(entry.id)}
+                          disabled={!entry.supported || actionStates[entry.id] === 'installing'}
+                        >
+                          <Download className="w-3 h-3 inline mr-1" />
+                          {actionStates[entry.id] === 'installing' ? t('engines.installing') : installed?.status === 'download_failed' ? t('downloads.retry') : t('engines.install')}
+                        </button>
+                      ) : (
+                        <>
+                          {(installed.status === 'installed' || installed.status === 'update_available' || installed.status === 'broken_installation') && (
+                            <button
+                              className="btn-secondary text-xs"
+                              onClick={() => handleLaunch(installed.id)}
+                              title={t('engines.launch')}
+                            >
+                              <Play className="w-3 h-3" />
+                            </button>
+                          )}
                           <button
                             className="btn-secondary text-xs"
-                            onClick={() => handleLaunch(installed.id)}
-                            title="Launch Engine"
+                            onClick={() => handleCheckUpdate(entry.id)}
+                            disabled={actionStates[`check_${entry.id}`] === 'checking'}
+                             title={t('engines.checkUpdates')}
+                          >
+                            <RefreshCw className={`w-3 h-3 ${actionStates[`check_${entry.id}`] === 'checking' ? 'animate-spin' : ''}`} />
+                          </button>
+                          {updateInfo?.updateAvailable && (
+                            <button
+                              className="btn-primary text-xs"
+                              onClick={() => handleUpdate(installed.id)}
+                              disabled={actionStates[`update_${installed.id}`] === 'updating'}
+                            >
+                              {actionStates[`update_${installed.id}`] === 'updating' ? t('engines.updating') : t('engines.update')}
+                            </button>
+                          )}
+                          <button
+                            className="btn-secondary text-xs"
+                            onClick={() => handleRepair(installed.id)}
+                            disabled={actionStates[`repair_${installed.id}`] === 'repairing'}
+                            title={t('engines.repair')}
+                          >
+                            <Wrench className={`w-3 h-3 ${actionStates[`repair_${installed.id}`] === 'repairing' ? 'animate-spin' : ''}`} />
+                          </button>
+                          {installed.installPath && (
+                            <button
+                              className="btn-secondary text-xs"
+                              onClick={() => openFolder(installed.id)}
+                              title={t('engines.openFolder')}
+                            >
+                              <FolderOpen className="w-3 h-3" />
+                            </button>
+                          )}
+                          <button
+                            className="btn-secondary text-xs"
+                            onClick={() => handleVerify(installed.id, entry.id)}
+                            title={t('engines.verify')}
+                          >
+                            <Shield className="w-3 h-3" />
+                          </button>
+                          <button
+                            className="btn-secondary text-xs"
+                            onClick={() => handleCreateShortcut(installed.id)}
+                            title={t('engines.createShortcut')}
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                          </button>
+                          <button
+                            className="btn-danger text-xs"
+                            onClick={() => handleUninstall(installed.id)}
+                            title={t('engines.uninstall')}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+
+            {/* Imported engines section */}
+            {tab === 'all' && importedEngines.length > 0 && (
+              <div className="mt-8">
+                <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                  <Download className="w-4 h-4 text-violet-400" />
+                  {t('engines.importedEngines')}
+                  <span className="text-xs text-surface-500 font-normal">({importedEngines.length})</span>
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {importedEngines.map((engine) => {
+                    const updateInfo = updateInfos[engine.type];
+                    const verifyResult = verifications[engine.id];
+
+                    return (
+                      <motion.div
+                        key={engine.id}
+                        layout
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="card p-5 flex flex-col gap-2 h-full hover:-translate-y-1 hover:shadow-xl hover:shadow-black/30 border-violet-500/20"
+                      >
+                        <EngineBanner
+                          engineName={engine.name}
+                          height={90}
+                          className="-mx-5"
+                        />
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-white font-semibold text-sm truncate">{engine.name}</h3>
+                            <p className="text-surface-400 text-xs mt-1 line-clamp-3 leading-relaxed">{engine.description}</p>
+                          </div>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-violet-400 bg-violet-500/10 rounded-full flex-shrink-0 ml-2">
+                            {t('engines.imported')}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-[10px] text-surface-500">
+                          {engine.version && <span>{t('engines.version', { version: engine.version })}</span>}
+                        </div>
+
+                        {engine.error && (
+                          <div className="flex items-center gap-1.5 p-2 rounded bg-red-500/10 text-red-400 text-[11px]">
+                            <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                            {engine.error}
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap gap-2 mt-auto pt-2">
+                          <button
+                            className="btn-secondary text-xs"
+                            onClick={() => handleLaunch(engine.id)}
+                            title={t('engines.launch')}
                           >
                             <Play className="w-3 h-3" />
                           </button>
-                        )}
-                        <button
-                          className="btn-secondary text-xs"
-                          onClick={() => handleCheckUpdate(entry.id)}
-                          disabled={actionStates[`check_${entry.id}`] === 'checking'}
-                          title="Check for Updates"
-                        >
-                          <RefreshCw className={`w-3 h-3 ${actionStates[`check_${entry.id}`] === 'checking' ? 'animate-spin' : ''}`} />
-                        </button>
-                        {updateInfo?.updateAvailable && (
-                          <button
-                            className="btn-primary text-xs"
-                            onClick={() => handleUpdate(installed.id)}
-                            disabled={actionStates[`update_${installed.id}`] === 'updating'}
-                          >
-                            {actionStates[`update_${installed.id}`] === 'updating' ? 'Updating...' : 'Update'}
-                          </button>
-                        )}
-                        <button
-                          className="btn-secondary text-xs"
-                          onClick={() => handleRepair(installed.id)}
-                          disabled={actionStates[`repair_${installed.id}`] === 'repairing'}
-                          title="Repair"
-                        >
-                          <Wrench className={`w-3 h-3 ${actionStates[`repair_${installed.id}`] === 'repairing' ? 'animate-spin' : ''}`} />
-                        </button>
-                        {installed.installPath && (
                           <button
                             className="btn-secondary text-xs"
-                            onClick={() => openFolder(installed.id)}
-                            title="Open Folder"
+                            onClick={() => handleRepair(engine.id)}
+                            disabled={actionStates[`repair_${engine.id}`] === 'repairing'}
+                            title={t('engines.repair')}
                           >
-                            <FolderOpen className="w-3 h-3" />
+                            <Wrench className={`w-3 h-3 ${actionStates[`repair_${engine.id}`] === 'repairing' ? 'animate-spin' : ''}`} />
                           </button>
-                        )}
-                        <button
-                          className="btn-secondary text-xs"
-                          onClick={() => handleVerify(installed.id, entry.id)}
-                          title="Verify Files"
-                        >
-                          <Shield className="w-3 h-3" />
-                        </button>
-                        <button
-                          className="btn-secondary text-xs"
-                          onClick={() => handleCreateShortcut(installed.id)}
-                          title="Create Shortcut"
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                        </button>
-                        <button
-                          className="btn-danger text-xs"
-                          onClick={() => handleUninstall(installed.id)}
-                          title="Uninstall"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
+                          {engine.installPath && (
+                            <button
+                              className="btn-secondary text-xs"
+                              onClick={() => openFolder(engine.id)}
+                              title={t('engines.openFolder')}
+                            >
+                              <FolderOpen className="w-3 h-3" />
+                            </button>
+                          )}
+                          <button
+                            className="btn-secondary text-xs"
+                            onClick={() => handleVerify(engine.id, engine.type)}
+                            title={t('engines.verify')}
+                          >
+                            <Shield className="w-3 h-3" />
+                          </button>
+                          <button
+                            className="btn-danger text-xs"
+                            onClick={() => handleUninstall(engine.id)}
+                            title={t('engines.uninstall')}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </motion.div>
     </div>

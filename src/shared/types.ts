@@ -30,6 +30,8 @@ export interface ModData {
   isTrending: boolean;
   isPopular: boolean;
   isFavorited: boolean;
+  coverPath?: string | null;
+  customCover?: boolean;
 }
 
 export interface DownloadData {

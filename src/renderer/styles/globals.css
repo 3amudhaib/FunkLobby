@@ -145,6 +145,25 @@
     @apply h-full rounded-full transition-all duration-300;
     background: linear-gradient(90deg, var(--theme-primary), color-mix(in srgb, var(--theme-primary) 70%, white));
   }
+
+  .progress-bar-indeterminate {
+    @apply w-full;
+    animation: progress-indeterminate 1.5s ease-in-out infinite;
+    background-size: 200% 100%;
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      var(--theme-primary) 25%,
+      color-mix(in srgb, var(--theme-primary) 70%, white) 50%,
+      var(--theme-primary) 75%,
+      transparent 100%
+    );
+  }
+
+  @keyframes progress-indeterminate {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
 }
 
 .light body,
@@ -180,3 +199,5 @@ body.light {
 .light ::-webkit-scrollbar-thumb {
   @apply bg-surface-300/50 hover:bg-surface-400/50;
 }
+
+

@@ -170,15 +170,6 @@ export const useSearchStore = create<SearchState>()(
 
       installMod: async (mod: SearchResultMod, profileId: string) => {
         try {
-          const downloadUrl = await window.electronAPI.getDownloadUrl(mod.gameBananaId);
-          if (!downloadUrl) throw new Error('No download URL available');
-
-          await window.electronAPI.startDownload({
-            modId: mod.id,
-            url: downloadUrl,
-            fileName: `${mod.title.replace(/[<>:"/\\|?*]/g, '_')}.zip`,
-          });
-
           await window.electronAPI.installMod(mod.id, profileId);
           set((s) => ({
             results: s.results.map((r) =>

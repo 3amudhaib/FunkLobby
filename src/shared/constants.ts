@@ -1,6 +1,6 @@
 export const APP_NAME = 'FunkLobby';
 export const APP_VERSION = '1.0.0';
-export const APP_REPO = 'https://github.com/example/fnf-lobby';
+export const APP_REPO = 'https://github.com/3amudhaib/FunkLobby';
 
 export { ENGINE_CATALOG } from './engineTypes';
 
@@ -89,6 +89,7 @@ export const DEFAULT_SETTINGS = {
   notifications: true,
   autoUpdate: true,
   autoUpdateMods: true,
+  smartScreenDismissed: 'false',
 };
 
 export const IPC_CHANNELS = {
@@ -148,6 +149,7 @@ export const IPC_CHANNELS = {
   CREATE_ENGINE_SHORTCUT: 'engines:createShortcut',
   GET_ENGINE_LOGS: 'engines:logs',
   GET_ENGINE_IMAGE: 'engines:getImage',
+  IMPORT_ENGINE: 'engines:importExternal',
 
   // Profile operations
   CREATE_PROFILE: 'profiles:create',
@@ -181,6 +183,16 @@ export const IPC_CHANNELS = {
   // Local import operations
   SELECT_LOCAL_MOD_FOLDER: 'mods:selectLocalModFolder',
   SAVE_LOCAL_MOD: 'mods:saveLocalMod',
+  INSTALL_TO_ENGINE: 'mods:installToEngine',
+  GET_INSTALLED_ENGINES: 'mods:getInstalledEngines',
+
+  // Cover operations
+  SET_COVER: 'mods:setCover',
+  REMOVE_COVER: 'mods:removeCover',
+  GET_COVER_PATH: 'mods:getCoverPath',
+
+  // Engine install progress (main → renderer)
+  ENGINE_INSTALL_PROGRESS: 'engine:installProgress',
 
   // Cache operations
   GET_CACHE_SIZE: 'cache:getSize',

@@ -1,5 +1,6 @@
-import { app, BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, session, protocol, net } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { registerAllIpc } from './ipc';
 import { LogManager } from './managers/LogManager';
 import { CacheManager } from './managers/CacheManager';
@@ -7,6 +8,8 @@ import { initDatabase } from './managers/PrismaManager';
 import { ModSourceManager } from './managers/ModSourceManager';
 import { RepairManager } from './managers/RepairManager';
 import { UpdateManager } from './managers/UpdateManager';
+import { ThemeIconManager } from './managers/ThemeIconManager';
+import { resolvePackagedAssetPath } from './utils/packagedPathResolver';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -18,7 +21,7 @@ function createWindow() {
     minHeight: 700,
     frame: true,
     show: false,
-    icon: path.join(__dirname, '../../assets/icon.png'),
+    icon: resolvePackagedAssetPath(['assets', 'icon.png']),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -33,6 +36,23 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
+    console.log('MAIN_PROCESS: Window ready-to-show fired');
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('MAIN_PROCESS: Renderer did-finish-load');
+    // Check for renderer errors after a short delay
+    setTimeout(() => {
+      mainWindow?.webContents.executeJavaScript('console.log("RENDERER_ALIVE: JavaScript confirmed running in renderer")').catch(() => {});
+    }, 1000);
+  });
+
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const levels = ['verbose', 'info', 'warning', 'error'];
+    const lvl = levels[level] || 'unknown';
+    if (lvl === 'error' || lvl === 'warning') {
+      console.log(`RENDERER_${lvl.toUpperCase()}: ${message} (${sourceId}:${line})`);
+    }
   });
 
   if (process.env.NODE_ENV === 'development' || process.argv.includes('--dev')) {
@@ -62,12 +82,19 @@ app.whenReady().then(async () => {
     LogManager.warn(`Failed to preload trending mods`, { error: String(e) });
   });
 
+  protocol.handle('cover', (request) => {
+    const filePath = decodeURIComponent(request.url.slice('cover://'.length));
+    return new Response(fs.readFileSync(filePath), {
+      headers: { 'Content-Type': 'image/png' },
+    });
+  });
+
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:* https:;",
+          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: file: cover:; font-src 'self' data:; connect-src 'self' http://localhost:* https:;",
         ],
       },
     });
@@ -75,6 +102,10 @@ app.whenReady().then(async () => {
 
   registerAllIpc();
   createWindow();
+
+  ThemeIconManager.loadSavedTheme().catch(e => {
+    LogManager.warn('Failed to load saved theme icon', { error: String(e) });
+  });
 
   UpdateManager.checkOnStartup().catch(e => {
     LogManager.warn('Auto-update check on startup failed', { error: String(e) });
@@ -99,9 +130,11 @@ app.on('before-quit', () => {
 });
 
 process.on('uncaughtException', (error) => {
+  console.error('UNCAUGHT EXCEPTION:', error.message, error.stack);
   LogManager.error('Uncaught exception', { error: error.message, stack: error.stack });
 });
 
 process.on('unhandledRejection', (reason) => {
+  console.error('UNHANDLED REJECTION:', String(reason));
   LogManager.error('Unhandled rejection', { reason: String(reason) });
 });

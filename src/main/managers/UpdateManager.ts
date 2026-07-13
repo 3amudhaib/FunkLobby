@@ -7,6 +7,7 @@ import { LogManager } from './LogManager';
 import { ExtractionManager } from './ExtractionManager';
 import { asyncFs } from '../asyncFs';
 import { APP_NAME, APP_VERSION } from '../../shared/constants';
+import { selectPreferredAsset } from './updateAssetSelection';
 import {
   UpdateInfo, UpdateChannel, UpdateState, UpdateDownloadProgress,
   UpdateStatus, UPDATE_REPO_OWNER, UPDATE_REPO_NAME,
@@ -89,39 +90,7 @@ function semverCompare(a: string, b: string): number {
 }
 
 function selectAssetForPlatform(assets: CachedRelease['assets']): CachedRelease['assets'][0] | null {
-  const isWin = process.platform === 'win32';
-  const arch = process.arch;
-
-  const scored = assets.map(a => {
-    const name = a.name.toLowerCase();
-    let score = 0;
-
-    if (isWin) {
-      if (name.endsWith('.exe') || name.endsWith('.msi')) score += 150;
-      if (name.endsWith('.zip') || name.endsWith('.7z')) score += 80;
-      if (name.includes('win') || name.includes('windows') || name.includes('nsis') || name.includes('setup')) score += 50;
-      if (name.includes('x64') || name.includes('64') || name.includes('amd64')) score += 30;
-      if (name.includes('x86') || name.includes('32') || name.includes('ia32')) score += 30;
-      if (name.includes('portable') || name.includes('green')) score -= 10;
-    } else if (process.platform === 'darwin') {
-      if (name.endsWith('.dmg') || name.endsWith('.app')) score += 150;
-      if (name.endsWith('.zip')) score += 80;
-      if (name.includes('mac') || name.includes('darwin') || name.includes('osx')) score += 50;
-    } else {
-      if (name.endsWith('.appimage')) score += 150;
-      if (name.endsWith('.deb') || name.endsWith('.rpm')) score += 100;
-      if (name.includes('linux') || name.includes('ubuntu')) score += 50;
-    }
-
-    if (name.includes('source') || name.includes('src')) score -= 100;
-    if (name.includes('delta') || name.includes('diff')) score += 20;
-    if (name.includes('blockmap') || name.includes('yml')) score -= 50;
-
-    return { asset: a, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  return scored[0]?.score > 0 ? scored[0].asset : null;
+  return selectPreferredAsset(assets, process.platform, process.arch) as CachedRelease['assets'][0] | null;
 }
 
 async function copyRecursive(src: string, dest: string): Promise<void> {
@@ -306,26 +275,15 @@ export class UpdateManager {
 
       if (isPackaged && (ext === '.exe' || ext === '.msi')) {
         const { execFile } = require('child_process');
-        const batPath = path.join(app.getPath('temp'), `${APP_NAME}_update_${Date.now()}.bat`);
-        const targetExe = path.join(appRoot, `${APP_NAME}.exe`);
+        const downloadedName = path.basename(downloadPath).toLowerCase();
+        const isInstallerLike = downloadedName.includes('setup') || downloadedName.includes('installer') || downloadedName.includes('nsis') || downloadedName.includes('install');
 
-        const batContent = [
-          '@echo off',
-          'chcp 65001 >nul',
-          `timeout /t 2 /nobreak >nul`,
-          `:retry`,
-          `del /f /q "${targetExe}" 2>nul`,
-          `if exist "${targetExe}" goto retry`,
-          `copy /y "${downloadPath}" "${targetExe}" >nul`,
-          `start "" "${targetExe}"`,
-          `del /f /q "${batPath}"`,
-          'exit',
-        ].join('\r\n');
+        if (!isInstallerLike) {
+          throw new Error('Downloaded update is not an installer package. Please use a release asset that contains an installer.');
+        }
 
-        await asyncFs.writeFile(batPath, batContent);
-
-        execFile('cmd.exe', ['/c', batPath], { detached: true, stdio: 'ignore' }, () => {});
-        process.exit(0);
+        execFile(downloadPath, [], { detached: true, stdio: 'ignore' }, () => {});
+        app.quit();
         return;
       }
 

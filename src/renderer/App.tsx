@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { Sidebar } from './components/Sidebar';
 import { TitleBar } from './components/TitleBar';
 import { DownloadQueue } from './components/DownloadQueue';
+import { SmartScreenNotice } from './components/SmartScreenNotice';
 import { useDownloadEvents } from './hooks/useDownloadEvents';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useSettingsStore } from './stores/settingsStore';
@@ -21,13 +22,15 @@ import { FavoritesPage } from './pages/FavoritesPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AboutPage } from './pages/AboutPage';
 import { ModDetailPage } from './pages/ModDetailPage';
+import { GameBananaModDetailPage } from './pages/GameBananaModDetailPage';
 import { UpdatePage } from './pages/UpdatePage';
 
 function AppContent() {
-  const { settings, fetchSettings } = useSettingsStore();
+  const { settings, loading, fetchSettings, updateSettings } = useSettingsStore();
   const { fetchEngines, detectEngines } = useEngineStore();
   const { fetchProfiles } = useProfileStore();
   const { isQueueVisible } = useDownloadStore();
+  const [showSmartScreen, setShowSmartScreen] = useState(false);
 
   useDownloadEvents();
   useKeyboardShortcuts();
@@ -40,6 +43,19 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
+    if (!loading && settings.smartScreenDismissed !== 'true') {
+      setShowSmartScreen(true);
+    }
+  }, [loading, settings.smartScreenDismissed]);
+
+  const handleSmartScreenDismiss = async (dontShowAgain: boolean) => {
+    if (dontShowAgain) {
+      await updateSettings({ smartScreenDismissed: 'true' });
+    }
+    setShowSmartScreen(false);
+  };
+
+  useEffect(() => {
     const root = document.documentElement;
 
     if (settings.theme === 'light') {
@@ -48,7 +64,6 @@ function AppContent() {
       root.classList.remove('light');
     }
 
-    // Get preset colors or custom colors
     let primary: string, bg: string, surface: string;
     if (settings.theme === 'custom') {
       primary = settings.customPrimary || '#3b82f6';
@@ -75,10 +90,20 @@ function AppContent() {
   }, [settings.theme, settings.customPrimary, settings.customBg]);
 
   return (
-    <div className="h-screen flex">
+    <>
+      <SmartScreenNotice open={showSmartScreen} onDismiss={handleSmartScreenDismiss} />
+      <div className="h-screen flex">
       <TitleBar />
       <Sidebar />
       <main className={`flex-1 overflow-y-auto ml-56 ${isQueueVisible ? 'mr-80' : ''}`}>
+        <div className="mx-4 mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          <p className="leading-6">
+            Please note that there may be some errors or issues with the app; if you encounter any, please send details to this email address:{' '}
+            <a href="mailto:kinimation28@gmail.com" className="font-medium underline decoration-amber-400 underline-offset-2">
+              kinimation28@gmail.com
+            </a>
+          </p>
+        </div>
         <AnimatePresence mode="wait">
           <Routes>
             <Route path="/" element={<HomePage />} />
@@ -92,11 +117,13 @@ function AppContent() {
             <Route path="/about" element={<AboutPage />} />
             <Route path="/updates" element={<UpdatePage />} />
             <Route path="/mod/:id" element={<ModDetailPage />} />
+            <Route path="/gb/:id" element={<GameBananaModDetailPage />} />
           </Routes>
         </AnimatePresence>
       </main>
       <DownloadQueue />
     </div>
+    </>
   );
 }
 

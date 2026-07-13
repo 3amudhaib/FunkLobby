@@ -6,6 +6,7 @@ import { registerSettingsIpc } from './settingsIpc';
 import { registerFileIpc } from './fileIpc';
 import { registerAppIpc } from './appIpc';
 import { registerUpdateIpc } from './updateIpc';
+import { registerDiscoverIpc } from './discoverIpc';
 
 export function registerAllIpc() {
   registerModIpc();
@@ -16,4 +17,5 @@ export function registerAllIpc() {
   registerFileIpc();
   registerAppIpc();
   registerUpdateIpc();
+  registerDiscoverIpc();
 }

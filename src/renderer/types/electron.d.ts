@@ -33,8 +33,11 @@ export interface ElectronAPI {
   getQueue: () => Promise<any[]>;
 
   onDownloadProgress: (callback: (data: any) => void) => void;
+  removeDownloadProgressListener: (callback: (data: any) => void) => void;
   onDownloadComplete: (callback: (data: any) => void) => void;
+  removeDownloadCompleteListener: (callback: (data: any) => void) => void;
   onDownloadError: (callback: (data: any) => void) => void;
+  removeDownloadErrorListener: (callback: (data: any) => void) => void;
 
   getEngineCatalog: () => Promise<any[]>;
   getEngines: () => Promise<any[]>;
@@ -53,6 +56,10 @@ export interface ElectronAPI {
   createEngineShortcut: (engineId: string) => Promise<any>;
   getEngineImage: (engineType: string) => Promise<string | null>;
   getEngineLogs: (engineId: string) => Promise<any>;
+  importExternalEngine: () => Promise<any>;
+
+  onEngineInstallProgress: (callback: (data: { engineType: string; percent: number; status: string }) => void) => void;
+  removeEngineInstallProgressListener: (callback: (data: any) => void) => void;
 
   createProfile: (name: string, description?: string) => Promise<any>;
   deleteProfile: (id: string) => Promise<any>;
@@ -79,11 +86,23 @@ export interface ElectronAPI {
   getLogs: (level?: string) => Promise<any[]>;
   clearAllData: () => Promise<{ success: boolean; reason?: string }>;
 
-  selectLocalModFolder: () => Promise<{ folderPath: string; folderName: string; engines: Array<{ id: string; name: string }>; canceled?: boolean }>;
-  saveLocalMod: (params: { name: string; sourceFolder: string; engine: string; enginePath?: string }) => Promise<any>;
+  selectLocalModFolder: () => Promise<{ folderPath: string; folderName: string; canceled?: boolean }>;
+  saveLocalMod: (params: { name: string; sourceFolder: string }) => Promise<any>;
+  installToEngine: (params: { modId: string; engineId: string }) => Promise<{ success: boolean; targetPath: string; renamed: boolean }>;
+  getInstalledEngines: () => Promise<Array<{ id: string; type: string; name: string; installPath: string }>>;
+
+  setCover: (modId: string) => Promise<any>;
+  removeCover: (modId: string) => Promise<any>;
+  getCoverPath: (modId: string) => Promise<string | null>;
 
   getCacheSize: () => Promise<{ api: number; thumbnails: number; total: number }>;
   clearCache: (type?: 'api' | 'thumbnails' | 'all') => Promise<{ success: boolean }>;
+
+  // Discover operations
+  discoverGetSection: (section: string) => Promise<any[]>;
+  discoverGetRichDetails: (gameBananaId: number) => Promise<any>;
+  discoverSearch: (params: { query?: string; category?: string; engine?: string; sortBy?: string; page?: number; limit?: number }) => Promise<any>;
+  discoverDownloadUrl: (gameBananaId: number) => Promise<string | null>;
 
   // Update operations
   checkUpdatesApp: (force?: boolean) => Promise<any>;

@@ -42,7 +42,7 @@ export interface UpdateState {
   autoUpdate: boolean;
 }
 
-export const UPDATE_REPO_OWNER = 'FunkLobby';
+export const UPDATE_REPO_OWNER = '3amudhaib';
 export const UPDATE_REPO_NAME = 'FunkLobby';
 
 export const UPDATE_IPC_CHANNELS = {

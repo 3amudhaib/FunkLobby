@@ -3,6 +3,31 @@
   "version": "1.0.0",
   "description": "FunkLobby - Mod Manager and Launcher for Friday Night Funkin'",
   "main": "dist/main/main.js",
+  "author": {
+    "name": "FunkLobby",
+    "email": "mohamozyeen@gmail.com",
+    "url": "https://github.com/3amudhaib"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/3amudhaib/FunkLobby.git"
+  },
+  "bugs": {
+    "url": "https://github.com/3amudhaib/FunkLobby/issues"
+  },
+  "homepage": "https://github.com/3amudhaib/FunkLobby",
+  "license": "MIT",
+  "keywords": [
+    "friday-night-funkin",
+    "fnf",
+    "mod-manager",
+    "mod-launcher",
+    "electron",
+    "electron-app"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "predev": "node scripts/free-port.mjs 5173",
     "dev": "concurrently -k \"npm run dev:vite\" \"npm run dev:electron\"",
@@ -20,32 +45,31 @@
     "prepackage": "node -e \"require('fs').rmSync('release',{recursive:true,force:true})\"",
     "dist": "npm run build && electron-builder",
     "package": "npm run build && electron-builder",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "i18n:check": "node scripts/check-translations.js",
+    "i18n:generate": "node scripts/generate-missing-keys.js"
   },
   "dependencies": {
     "@prisma/client": "^5.14.0",
+    "@radix-ui/react-context-menu": "^2.1.5",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-dropdown-menu": "^2.0.6",
-    "@radix-ui/react-context-menu": "^2.1.5",
-    "@radix-ui/react-tabs": "^1.0.4",
-    "@radix-ui/react-tooltip": "^1.0.7",
     "@radix-ui/react-popover": "^1.0.7",
-    "@radix-ui/react-switch": "^1.0.3",
-    "@radix-ui/react-slider": "^1.1.2",
+    "@radix-ui/react-progress": "^1.0.3",
     "@radix-ui/react-scroll-area": "^1.0.5",
     "@radix-ui/react-separator": "^1.0.3",
-    "@radix-ui/react-progress": "^1.0.3",
+    "@radix-ui/react-slider": "^1.1.2",
+    "@radix-ui/react-switch": "^1.0.3",
+    "@radix-ui/react-tabs": "^1.0.4",
+    "@radix-ui/react-tooltip": "^1.0.7",
     "archiver": "^7.0.1",
     "axios": "^1.7.2",
     "clsx": "^2.1.1",
-    "debug": "^4.3.4",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.1.8",
     "extract-zip": "^2.0.1",
-    "follow-redirects": "^1.15.6",
-    "form-data": "^4.0.0",
     "framer-motion": "^11.2.6",
-    "https-proxy-agent": "^7.0.4",
+    "https-proxy-agent": "5.0.1",
     "lucide-react": "^0.378.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -57,18 +81,20 @@
     "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.2",
     "@types/node": "^20.14.2",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "@types/archiver": "^6.0.2",
     "@types/unzipper": "^0.10.9",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
     "concurrently": "^8.2.2",
     "electron": "^30.0.8",
     "electron-builder": "^24.13.3",
+    "png-to-ico": "^3.0.2",
     "postcss": "^8.4.38",
     "prisma": "^5.14.0",
+    "sharp": "^0.35.3",
     "tailwindcss": "^3.4.4",
     "typescript": "^5.4.5",
     "vite": "^5.2.12",
@@ -77,6 +103,7 @@
   "build": {
     "appId": "com.funklobby.app",
     "productName": "FunkLobby",
+    "copyright": "Copyright (c) 2026 FunkLobby",
     "directories": {
       "output": "release"
     },
@@ -89,20 +116,55 @@
     ],
     "extraResources": [
       {
+        "from": "assets/icon.ico",
+        "to": "assets/icon.ico"
+      },
+      {
+        "from": "assets/icon.png",
+        "to": "assets/icon.png"
+      },
+      {
         "from": "prisma/",
         "to": "prisma/"
+      },
+      {
+        "from": "assets/icons/themes/",
+        "to": "assets/icons/themes/"
+      },
+      {
+        "from": "assets/engines-banner",
+        "to": "assets/engines-banner"
       }
     ],
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
-        "nsis"
+        "nsis",
+        "portable"
       ],
+      "publisherName": "FunkLobby",
+      "legalTrademarks": "FunkLobby",
       "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true
+      "createDesktopShortcut": true,
+      "shortcutName": "FunkLobby",
+      "artifactName": "${productName} Setup.${ext}",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico"
+    },
+    "portable": {
+      "artifactName": "${productName} Portable.${ext}",
+      "requestExecutionLevel": "user"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "3amudhaib",
+      "repo": "FunkLobby",
+      "releaseType": "release"
     }
   }
 }

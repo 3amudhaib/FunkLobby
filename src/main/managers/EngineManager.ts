@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { execFile, spawn } from 'child_process';
-import { app } from 'electron';
+import { getSafeChildProcessOptions, resolvePackagedAssetPath } from '../utils/packagedPathResolver';
+import { app, BrowserWindow } from 'electron';
 import axios from 'axios';
 import { getPrisma } from './PrismaManager';
 import { LogManager } from './LogManager';
@@ -9,6 +10,7 @@ import { ExtractionManager } from './ExtractionManager';
 import { asyncFs } from '../asyncFs';
 import { ENGINE_CATALOG, EngineCatalogEntry, classifyEngineInstallMethod } from '../../shared/engineTypes';
 import { STANDALONE_ENGINE_ID } from '../../shared/constants';
+import { loadReleaseFromCache } from './engineReleaseCache';
 
 const INSTALL_ROOT = 'engine-manager';
 const IMAGE_CACHE_DIR = 'engine-images';
@@ -38,34 +40,16 @@ interface InstallResult {
 const BINARY_ASSET_MAP: Record<string, { binaryHint: string; exeName: string }> = {
   psych: { binaryHint: 'Windows64', exeName: 'PsychEngine.exe' },
   codename: { binaryHint: 'Windows', exeName: 'CodenameEngine.exe' },
-  yoshicrafter: { binaryHint: 'Windows', exeName: 'YoshiCrafterEngine.exe' },
   cdev: { binaryHint: 'win64', exeName: 'CDEVEngine.exe' },
+  yoshicrafter: { binaryHint: 'Windows', exeName: 'YoshiCrafterEngine.exe' },
   dragon: { binaryHint: 'Windows', exeName: 'DragonEngine.exe' },
-  enigma: { binaryHint: 'windows', exeName: 'EnigmaEngine.exe' },
-  crow: { binaryHint: 'windows', exeName: 'CrowEngine.exe' },
-  shattered: { binaryHint: 'windowsBuild', exeName: 'ShatteredEngine.exe' },
-  'funkin-plus-plus': { binaryHint: 'Windows', exeName: 'PlusEngine.exe' },
-  troll: { binaryHint: 'windowsBuild', exeName: 'TrollEngine.exe' },
   shadow: { binaryHint: 'windows-x86_64', exeName: 'ShadowEngine.exe' },
+  shattered: { binaryHint: 'windowsBuild', exeName: 'ShatteredEngine.exe' },
   slushi: { binaryHint: 'Win64', exeName: 'SlushiEngine.exe' },
+  troll: { binaryHint: 'windowsBuild', exeName: 'TrollEngine.exe' },
   universe: { binaryHint: 'Windows', exeName: 'UniverseEngine.exe' },
-  'micd-up': { binaryHint: 'Windows', exeName: 'MicdUp.exe' },
-  'fps-plus': { binaryHint: 'windows', exeName: 'FPSPlus.exe' },
-  kade: { binaryHint: 'windows', exeName: 'KadeEngine.exe' },
-  'forever-legacy': { binaryHint: 'windows', exeName: 'ForeverEngine.exe' },
-  andromeda: { binaryHint: 'windows', exeName: 'AndromedaEngine.exe' },
-  leather: { binaryHint: 'windows', exeName: 'LeatherEngine.exe' },
-  'modding-plus': { binaryHint: 'windows', exeName: 'ModdingPlus.exe' },
-  'forever-feather': { binaryHint: 'windows', exeName: 'ForeverFeather.exe' },
-  'forever-plus': { binaryHint: 'windows', exeName: 'ForeverPlus.exe' },
-  'forever-hybrid': { binaryHint: 'windows', exeName: 'ForeverHybrid.exe' },
-  'forever-underscore': { binaryHint: 'windows', exeName: 'ForeverUnderscore.exe' },
-  'psych-mint': { binaryHint: 'windows', exeName: 'PsychMint.exe' },
-  koala: { binaryHint: 'windows', exeName: 'KoalaEngine.exe' },
-  aether: { binaryHint: 'windows', exeName: 'AetherEngine.exe' },
-  optimized: { binaryHint: 'windows', exeName: 'OptimizedEngine.exe' },
-  beat: { binaryHint: 'windows', exeName: 'BeatEngine.exe' },
-  sarv: { binaryHint: 'windows', exeName: 'SarvEngine.exe' },
+  'v-slice': { binaryHint: 'Windows', exeName: 'V-Slice.exe' },
+  'funkin-plus-plus': { binaryHint: 'Windows', exeName: 'PlusEngine.exe' },
 };
 
 function getEnginesRoot(): string {
@@ -109,14 +93,16 @@ export class EngineManager {
       }
       // Validate the repository exists and is not archived
       const validation = await this.getCachedValidation(entry.repoOwner, entry.repoName);
-      if (!validation || !validation.valid) {
+      // Only skip entries that are definitively invalid (API explicitly returned invalid)
+      // If API is unreachable (null), assume repo is valid since it's in the hardcoded catalog
+      if (validation && !validation.valid) {
         continue;
       }
-      if (validation.archived) {
+      if (validation && validation.archived) {
         continue;
       }
       // Use the validated (possibly redirected) repo URL
-      if (validation.redirectUrl) {
+      if (validation?.redirectUrl) {
         entry.repoUrl = validation.redirectUrl;
         const parts = validation.redirectUrl.replace('https://github.com/', '').split('/');
         if (parts.length >= 2) {
@@ -134,14 +120,15 @@ export class EngineManager {
         entry.binaryAssetName = bam.binaryHint;
         entry.executableName = bam.exeName;
       }
-      if (method === 'binary') {
+      // Mark as supported if we have a viable install method
+      if (method === 'binary' || method === 'direct_download') {
         entry.supported = true;
-      } else if (method === 'direct_download') {
-        entry.supported = true;
+      } else if (!release && entry.repoOwner && entry.repoName) {
+        // Release API was unreachable — don't enable install since it would fail
+        entry.supported = false;
+        entry.installDisabledReason = 'Unable to fetch release info from GitHub. Check your connection and try again.';
       }
-      if (entry.supported) {
-        results.push(entry);
-      }
+      results.push(entry);
     }
     return results;
   }
@@ -165,9 +152,9 @@ export class EngineManager {
     const entry = ENGINE_CATALOG.find(e => e.id === engineType);
     if (!entry || !entry.repoOwner || !entry.repoName) return null;
 
-    // Skip fetching images for repositories that don't exist
+    // Skip fetching images only for repos that are definitively invalid
     const validation = await this.getCachedValidation(entry.repoOwner, entry.repoName);
-    if (!validation || !validation.valid) return null;
+    if (validation && !validation.valid) return null;
 
     const cacheDir = getImageCacheDir();
     await asyncFs.ensureDir(cacheDir);
@@ -180,8 +167,8 @@ export class EngineManager {
     } catch {}
 
     try {
-      const repoOwner = validation.redirectUrl ? validation.redirectUrl.replace('https://github.com/', '').split('/')[0] : entry.repoOwner;
-      const repoName = validation.redirectUrl ? validation.redirectUrl.replace('https://github.com/', '').split('/')[1] : entry.repoName;
+      const repoOwner = validation?.redirectUrl ? validation.redirectUrl.replace('https://github.com/', '').split('/')[0] : entry.repoOwner;
+      const repoName = validation?.redirectUrl ? validation.redirectUrl.replace('https://github.com/', '').split('/')[1] : entry.repoName;
       const resp = await axios.get(`https://api.github.com/repos/${repoOwner}/${repoName}`, {
         headers: { 'User-Agent': 'FunkLobby/1.0', 'Accept': 'application/vnd.github.v3+json' },
         timeout: 10000,
@@ -223,6 +210,14 @@ export class EngineManager {
     return validation;
   }
 
+  private static sendInstallProgress(engineType: string, percent: number, status: string): void {
+    try {
+      BrowserWindow.getAllWindows().forEach(win => {
+        win.webContents.send('engine:installProgress', { engineType, percent, status });
+      });
+    } catch {}
+  }
+
   private static async validateRepoAsync(owner: string, repo: string): Promise<RepoValidation | null> {
     try {
       const resp = await axios.get(`https://api.github.com/repos/${owner}/${repo}`, {
@@ -262,32 +257,59 @@ export class EngineManager {
     }
   }
 
+  private static installInProgress = new Set<string>();
+  private static readonly INSTALL_RETRY_DELAY_MS = 2000;
+  private static readonly API_RETRY_DELAY_MS = 1000;
+
   static async installEngine(engineType: string): Promise<void> {
+    if (this.installInProgress.has(engineType)) {
+      throw new Error(`Installation of ${engineType} is already in progress.`);
+    }
+    this.installInProgress.add(engineType);
+    try {
+      await this.installEngineImpl(engineType);
+    } finally {
+      this.installInProgress.delete(engineType);
+    }
+  }
+
+  private static async installEngineImpl(engineType: string): Promise<void> {
     const entry = ENGINE_CATALOG.find(e => e.id === engineType);
     if (!entry) throw new Error(`Unknown engine: ${engineType}`);
     if (entry.downloadType === 'manual') throw new Error(`${entry.name} does not support automatic installation. Download it manually from ${entry.websiteUrl || 'the official website'}.`);
 
-    // Validate repository before attempting install
-    if (entry.repoOwner && entry.repoName) {
-      const validation = await this.getCachedValidation(entry.repoOwner, entry.repoName);
-      if (!validation || !validation.valid) {
-        throw new Error(`${entry.name} repository is not available. Install it manually instead.`);
+    try {
+      if (entry.repoOwner && entry.repoName) {
+        const validation = await this.getCachedValidation(entry.repoOwner, entry.repoName);
+        if (validation && !validation.valid) {
+          throw new Error(`${entry.name} repository is not available. Install it manually instead.`);
+        }
       }
-    }
 
-    const release = entry.repoOwner && entry.repoName ? await this.getCachedRelease(entry.repoOwner, entry.repoName) : null;
-    const method = classifyEngineInstallMethod(entry, release);
-    if (method === 'source_only') {
-      throw new Error(`${entry.name} only provides source code. Build it manually from the official repository.`);
-    }
-    if (method === 'no_releases' || method === 'unknown_repo') {
-      throw new Error(`${entry.name} has no downloadable releases on GitHub.`);
-    }
+      let release = entry.repoOwner && entry.repoName ? await this.getCachedRelease(entry.repoOwner, entry.repoName) : null;
+      // Retry once with delay if release fetch failed (transient network/rate-limit issue)
+      if (!release && entry.repoOwner && entry.repoName) {
+        await new Promise(r => setTimeout(r, this.API_RETRY_DELAY_MS));
+        release = await this.getCachedRelease(entry.repoOwner, entry.repoName);
+      }
+      const method = classifyEngineInstallMethod(entry, release);
+      if (method === 'source_only') {
+        throw new Error(`${entry.name} only provides source code. Build it manually from the official repository.`);
+      }
+      if (method === 'no_releases') {
+        const bam = BINARY_ASSET_MAP[entry.id];
+        if (!bam) {
+          throw new Error(`${entry.name} has no downloadable releases on GitHub.`);
+        }
+      }
+      if (method === 'unknown_repo') {
+        throw new Error(`${entry.name} has no downloadable releases on GitHub.`);
+      }
 
-    const prisma = getPrisma();
-    const existing = await prisma.engine.findFirst({ where: { type: engineType } });
+      const prisma = getPrisma();
+      const existing = await prisma.engine.findFirst({ where: { type: engineType } });
 
-    const now = new Date().toISOString();
+      const now = new Date().toISOString();
     if (existing) {
       await prisma.engine.update({
         where: { id: existing.id },
@@ -313,36 +335,40 @@ export class EngineManager {
       });
     }
 
-    const result = await this.downloadAndInstall(entry, release);
+      const result = await this.downloadAndInstall(entry, release);
 
-    if (result.success) {
-      await prisma.engine.updateMany({
-        where: { type: engineType },
-        data: {
-          status: 'installed',
-          version: result.version,
-          installPath: result.installPath,
-          exePath: result.exePath,
-          error: null,
-          installedAt: now,
-          lastUpdatedAt: now,
-        },
-      });
+      if (result.success) {
+        await prisma.engine.updateMany({
+          where: { type: engineType },
+          data: {
+            status: 'installed',
+            version: result.version,
+            installPath: result.installPath,
+            exePath: result.exePath,
+            error: null,
+            installedAt: now,
+            lastUpdatedAt: now,
+          },
+        });
 
-      this.verifyHealthAfterLaunch(result.exePath!, result.installPath!).catch(() => {});
-      this.fetchEngineImage(engineType).catch(() => {});
-    } else {
-      await prisma.engine.updateMany({
-        where: { type: engineType },
-        data: {
-          status: 'download_failed',
-          error: result.error || 'Installation failed',
-          version: null,
-          installPath: null,
-          exePath: null,
-        },
-      });
-      throw new Error(result.error || 'Installation failed');
+        this.verifyHealthAfterLaunch(result.exePath!, result.installPath!).catch(() => {});
+        this.fetchEngineImage(engineType).catch(() => {});
+      } else {
+        await prisma.engine.updateMany({
+          where: { type: engineType },
+          data: {
+            status: 'download_failed',
+            error: result.error || 'Installation failed',
+            version: null,
+            installPath: null,
+            exePath: null,
+          },
+        });
+        throw new Error(result.error || 'Installation failed');
+      }
+    } catch (error: any) {
+      LogManager.error('Engine install request failed', { engineType, error: error?.message || String(error) });
+      throw error;
     }
   }
 
@@ -366,12 +392,25 @@ export class EngineManager {
         if (release) {
           releaseVersion = release.tag_name.replace(/^v/i, '');
           downloadUrl = this.selectBestAsset(entry, release);
+        } else {
+          // Fallback: try fetching latest release directly (bypass cache)
+          try {
+            const fallbackRelease = await this.fetchLatestGitHubReleaseAsync(entry.repoOwner, entry.repoName, '');
+            if (fallbackRelease) {
+              releaseVersion = fallbackRelease.tag_name.replace(/^v/i, '');
+              downloadUrl = this.selectBestAsset(entry, fallbackRelease);
+            }
+          } catch {}
         }
       } else if (entry.downloadUrl) {
         downloadUrl = entry.downloadUrl;
       }
 
       if (!downloadUrl) {
+        const hasBam = !!BINARY_ASSET_MAP[entry.id];
+        if (entry.repoOwner && entry.repoName && hasBam) {
+          return { success: false, error: `GitHub API rate limit reached. Please wait a few minutes and try again.` };
+        }
         return { success: false, error: `No download URL available for ${entry.name}.` };
       }
 
@@ -534,20 +573,28 @@ export class EngineManager {
     const cacheFile = path.join(cacheDir, `${cacheKey}.json`);
 
     try {
-      const exists = await asyncFs.exists(cacheFile);
-      if (exists) {
-        const raw = await asyncFs.readFile(cacheFile);
-        const cached = JSON.parse(raw as string);
-        const cachedTTL = 6 * 60 * 60 * 1000;
-        if (Date.now() - cached.fetchedAt < cachedTTL) {
-          return cached.data || null;
-        }
-        const stale = cached.data || null;
-        this.fetchLatestGitHubReleaseAsync(owner, repo, cacheFile).catch(() => {});
-        return stale;
-      }
-    } catch {}
-    return null;
+      return await loadReleaseFromCache<GitHubRelease>({
+        readCache: async () => {
+          try {
+            const raw = await asyncFs.readFile(cacheFile);
+            return JSON.parse(raw as string) as { fetchedAt: number; data: GitHubRelease | null };
+          } catch {
+            return null;
+          }
+        },
+        writeCache: async (entry) => {
+          try {
+            await asyncFs.ensureDir(cacheDir);
+            await asyncFs.writeFile(cacheFile, JSON.stringify(entry));
+          } catch {}
+        },
+        fetchLatest: async () => {
+          return this.fetchLatestGitHubReleaseAsync(owner, repo, cacheFile);
+        },
+      });
+    } catch {
+      return null;
+    }
   }
 
   private static async fetchLatestGitHubReleaseAsync(owner: string, repo: string, cacheFile: string): Promise<GitHubRelease | null> {
@@ -598,6 +645,18 @@ export class EngineManager {
       const hint = bam.binaryHint.toLowerCase();
       const preferred = candidates.find(a => a.name.toLowerCase().includes(hint));
       if (preferred) return preferred.browser_download_url;
+
+      const windowsArchive = candidates.find(a => {
+        const name = a.name.toLowerCase();
+        return (name.endsWith('.zip') || name.endsWith('.7z'))
+          && !name.includes('source')
+          && !name.includes('src')
+          && !name.includes('linux')
+          && !name.includes('mac')
+          && !name.includes('debug')
+          && (name.includes('windows') || name.includes('win32') || name.includes('win64') || name.includes('win'));
+      });
+      if (windowsArchive) return windowsArchive.browser_download_url;
     }
 
     const normalize = (s: string) => s.replace(/[^a-z0-9]/g, '');
@@ -824,9 +883,15 @@ export class EngineManager {
     if (!engineExe) throw new Error('Engine executable not found');
     const modArg = path.basename(modPath);
     return new Promise((resolve, reject) => {
-      execFile(engineExe, [modArg], { cwd: enginePath }, (error) => {
-        if (error) { LogManager.error('Failed to launch engine', { error: error.message }); reject(error); }
-        else { LogManager.info('Engine launched successfully'); resolve(); }
+      LogManager.info('Launching engine for mod', { engineExe, enginePath, modArg });
+      execFile(engineExe, [modArg], getSafeChildProcessOptions(enginePath), (error) => {
+        if (error) {
+          LogManager.error('Failed to launch engine', { engineExe, enginePath, modArg, error: error.message, code: error.code });
+          reject(error);
+        } else {
+          LogManager.info('Engine launched successfully', { engineExe, enginePath, modArg });
+          resolve();
+        }
       });
     });
   }
@@ -834,15 +899,24 @@ export class EngineManager {
   static async launchExe(exePath: string, cwd: string): Promise<{ healthOk: boolean; exitCode?: number }> {
     LogManager.info('Launching executable', { exePath, cwd });
     return new Promise((resolve) => {
-      const proc = spawn(exePath, [], { cwd, stdio: 'ignore' });
+      LogManager.info('Launching executable', { exePath, cwd });
+      const proc = spawn(exePath, [], { ...getSafeChildProcessOptions(cwd), stdio: 'ignore' });
       const timer = setTimeout(() => {
         if (proc.exitCode === null) { resolve({ healthOk: true }); }
       }, 2000);
 
-      proc.on('error', (err) => { clearTimeout(timer); resolve({ healthOk: false }); });
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        LogManager.error('Failed to start executable', { exePath, cwd, error: err.message });
+        resolve({ healthOk: false });
+      });
       proc.on('exit', (code) => {
         clearTimeout(timer);
-        resolve(code !== null && code !== 0 ? { healthOk: false, exitCode: code } : { healthOk: true });
+        const healthOk = code === null || code === 0;
+        if (!healthOk) {
+          LogManager.warn('Executable exited with error', { exePath, cwd, exitCode: code });
+        }
+        resolve(healthOk ? { healthOk: true } : { healthOk: false, exitCode: code });
       });
     });
   }
@@ -953,6 +1027,23 @@ export class EngineManager {
     await shell.openPath(engine.installPath);
   }
 
+  /** Get version string from a Windows executable */
+  private static async getExeVersion(exePath: string): Promise<string | null> {
+    try {
+      const { execFile } = await import('child_process');
+      return new Promise((resolve) => {
+        execFile('powershell', [
+          '-NoProfile', '-Command',
+          `(Get-Item '${exePath.replace(/'/g, "''")}').VersionInfo.FileVersion`,
+        ], { timeout: 5000 }, (err, stdout) => {
+          if (err) { resolve(null); return; }
+          const v = stdout?.toString().trim();
+          resolve(v || null);
+        });
+      });
+    } catch { return null; }
+  }
+
   static async createShortcut(engineId: string): Promise<void> {
     const prisma = getPrisma();
     const engine = await prisma.engine.findUnique({ where: { id: engineId } });
@@ -976,9 +1067,182 @@ export class EngineManager {
     }
   }
 
+  /**
+   * Remove all engine records that are not in the current catalog.
+   * Also clear cached images for removed engines.
+   */
+  static async purgeObsoleteEngines(): Promise<number> {
+    const prisma = getPrisma();
+    const catalogIds = new Set(ENGINE_CATALOG.map(e => e.id));
+    const allEngines = await prisma.engine.findMany({ select: { id: true, type: true, installPath: true } });
+    let removed = 0;
+    for (const engine of allEngines) {
+      if (!catalogIds.has(engine.type) && !engine.type.startsWith('imported_')) {
+        // Remove install files
+        if (engine.installPath) {
+          try {
+            await asyncFs.rm(engine.installPath, { recursive: true, force: true });
+          } catch {}
+        }
+        await prisma.engine.delete({ where: { id: engine.id } }).catch(() => {});
+        LogManager.info('Purged obsolete engine', { id: engine.id, type: engine.type });
+        removed++;
+      }
+    }
+
+    // Clear cached images for old engines
+    const imageCacheDir = getImageCacheDir();
+    if (await asyncFs.exists(imageCacheDir).catch(() => false)) {
+      try {
+        const images = await asyncFs.readdir(imageCacheDir) as string[];
+        for (const img of images) {
+          const engineType = path.basename(img, path.extname(img));
+          if (!catalogIds.has(engineType)) {
+            try {
+              await asyncFs.unlink(path.join(imageCacheDir, img));
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    return removed;
+  }
+
   static getAssetsEnginesPath(): string {
-    try { return path.join(app.getAppPath(), 'assets', 'engines'); }
-    catch { return path.join(__dirname, '..', '..', '..', 'assets', 'engines'); }
+    try {
+      return resolvePackagedAssetPath(['assets', 'engines']);
+    } catch {
+      return path.join(__dirname, '..', '..', '..', 'assets', 'engines');
+    }
+  }
+
+  /**
+   * Import an external engine from a ZIP archive or folder.
+   * Opens a dialog for the user to select a ZIP or folder, then detects
+   * the executable, name, version, and registers it in the DB.
+   */
+  static async importExternalEngine(): Promise<any> {
+    const { dialog } = await import('electron');
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile', 'openDirectory'],
+      title: 'Select Engine Executable or ZIP Archive',
+      filters: [
+        { name: 'Engine Files', extensions: ['exe', 'zip', '7z', 'jar', 'love'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+
+    const selectedPath = result.filePaths[0];
+    const stat = await asyncFs.stat(selectedPath).catch(() => null);
+    if (!stat) throw new Error('Cannot access selected file or folder');
+
+    let engineDir: string;
+    let tempDir: string | null = null;
+
+    if (stat.isDirectory()) {
+      engineDir = selectedPath;
+    } else {
+      const ext = path.extname(selectedPath).toLowerCase();
+      if (['.zip', '.7z'].includes(ext)) {
+        tempDir = path.join(app.getPath('userData'), 'engine-import', `import_${Date.now()}`);
+        await asyncFs.ensureDir(tempDir);
+
+        try {
+          if (ext === '.zip') {
+            const valid = await ExtractionManager.validateZipAsync(selectedPath);
+            if (valid) {
+              await ExtractionManager.extractZip(selectedPath, tempDir);
+            } else {
+              throw new Error('Invalid or corrupted ZIP archive');
+            }
+          } else {
+            throw new Error('7z archive extraction is not supported. Please extract it manually and select the folder.');
+          }
+        } catch (err: any) {
+          if (tempDir) await asyncFs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+          throw new Error(`Extraction failed: ${err.message}`);
+        }
+
+        const items = await asyncFs.readdir(tempDir) as string[];
+        if (items.length === 1 && await asyncFs.isDir(path.join(tempDir, items[0]))) {
+          engineDir = path.join(tempDir, items[0]);
+        } else {
+          engineDir = tempDir;
+        }
+      } else {
+        engineDir = path.dirname(selectedPath);
+      }
+    }
+
+    // Find the executable
+    let exePath: string | null = null;
+    if (stat.isFile() && (selectedPath.endsWith('.exe') || selectedPath.endsWith('.jar') || selectedPath.endsWith('.love'))) {
+      exePath = selectedPath;
+    } else {
+      exePath = await this.findEngineExe(engineDir);
+    }
+    if (!exePath) throw new Error('No executable found in the selected path');
+
+    // Try to identify the engine type
+    const exeName = path.basename(exePath, path.extname(exePath));
+    let detectedType: string | null = null;
+    let detectedName = exeName;
+
+    // Check against known engines by exe name
+    const exeLower = exeName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const knownEngines = [
+      { id: 'psych', name: 'Psych Engine', exes: ['psychengine', 'psych'] },
+      { id: 'codename', name: 'Codename Engine', exes: ['codenameengine', 'codename'] },
+      { id: 'cdev', name: 'CDEV Engine', exes: ['cdevengine', 'cdev'] },
+      { id: 'yoshicrafter', name: 'YoshiCrafter Engine', exes: ['yoshicrafterengine', 'yoshicrafter', 'yoshie'] },
+      { id: 'dragon', name: 'Dragon Engine', exes: ['dragonengine', 'dragon'] },
+      { id: 'shadow', name: 'Shadow Engine', exes: ['shadowengine', 'shadow'] },
+      { id: 'shattered', name: 'Shattered Engine', exes: ['shatteredengine', 'shattered'] },
+      { id: 'slushi', name: 'Slushi Engine', exes: ['slushiengine', 'slushi'] },
+      { id: 'troll', name: 'Troll Engine', exes: ['trollengine', 'troll'] },
+      { id: 'universe', name: 'Universe Engine', exes: ['universeengine', 'universe'] },
+      { id: 'funkin-plus-plus', name: 'Funkin Plus Plus', exes: ['plusengine', 'funkinplusplus', 'funkin+', 'funkin plus'] },
+    ];
+
+    for (const known of knownEngines) {
+      if (known.exes.some(e => exeLower.includes(e))) {
+        detectedType = known.id;
+        detectedName = known.name;
+        break;
+      }
+    }
+
+    // Try to get version from the exe or folder
+    let version: string | null = null;
+    try {
+      version = await this.getExeVersion(exePath);
+    } catch {}
+
+    // Register in DB
+    const prisma = getPrisma();
+    const now = new Date().toISOString();
+    const importedEngine = await prisma.engine.create({
+      data: {
+        name: detectedName,
+        type: detectedType || `imported_${exeName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+        version: version || '1.0.0',
+        description: `Imported external engine from ${selectedPath}`,
+        exePath,
+        installPath: engineDir,
+        status: 'installed',
+        isCustom: true,
+        isDetected: false,
+        importSource: selectedPath,
+        installedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+
+    LogManager.info('External engine imported', { id: importedEngine.id, name: detectedName, path: selectedPath });
+    return importedEngine;
   }
 
   static async getEngineLogs(engineId: string): Promise<string[]> {

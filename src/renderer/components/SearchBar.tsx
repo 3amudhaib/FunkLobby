@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { Search as SearchIcon, X, Loader2 } from 'lucide-react';
+import { useTranslation } from '../hooks/useTranslation';
 
 interface SearchBarProps {
   value: string;
@@ -14,9 +15,11 @@ interface SearchBarProps {
 
 export function SearchBar({
   value, onChange, onFocus, onKeyNav,
-  placeholder = 'Search mods...', className = '',
+  placeholder: placeholderProp, className = '',
   loading, autoFocus,
 }: SearchBarProps) {
+  const { t } = useTranslation();
+  const placeholder = placeholderProp ?? t('search.placeholder');
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [localValue, setLocalValue] = useState(value);

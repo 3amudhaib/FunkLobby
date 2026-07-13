@@ -1,10 +1,11 @@
-
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Pause, Play, RotateCcw, Trash2, DownloadCloud } from 'lucide-react';
 import { useDownloadStore } from '../stores/downloadStore';
 import { formatBytes, formatSpeed, formatEta } from '../utils/format';
+import { useTranslation } from '../hooks/useTranslation';
 
 export function DownloadQueue() {
+  const { t } = useTranslation();
   const { activeDownloads, isQueueVisible, setQueueVisible, pauseDownload, resumeDownload, cancelDownload, retryDownload } = useDownloadStore();
   const downloads = Array.from(activeDownloads.values());
 
@@ -22,7 +23,7 @@ export function DownloadQueue() {
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
           <div className="flex items-center gap-2">
             <DownloadCloud className="w-4 h-4 text-primary-400" />
-            <span className="text-sm font-semibold text-white">Downloads</span>
+            <span className="text-sm font-semibold text-white">{t('downloadQueue.title')}</span>
             <span className="text-[10px] text-surface-400 bg-surface-800 px-1.5 py-0.5 rounded-full">
               {downloads.length}
             </span>
@@ -39,7 +40,7 @@ export function DownloadQueue() {
           {downloads.length === 0 ? (
             <div className="text-center py-8">
               <DownloadCloud className="w-8 h-8 text-surface-600 mx-auto mb-2" />
-              <p className="text-xs text-surface-500">No active downloads</p>
+              <p className="text-xs text-surface-500">{t('downloadQueue.empty')}</p>
             </div>
           ) : (
             downloads.map((dl) => (
@@ -48,7 +49,9 @@ export function DownloadQueue() {
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-medium text-white truncate">{dl.fileName}</p>
                     <p className="text-[10px] text-surface-400 mt-0.5">
-                      {formatBytes(dl.downloadedBytes)} / {formatBytes(dl.totalBytes)}
+                      {dl.totalBytes > 0 || dl.downloadedBytes > 0
+                        ? `${formatBytes(dl.downloadedBytes)} / ${formatBytes(dl.totalBytes)}`
+                        : t('downloadQueue.starting')}
                     </p>
                   </div>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full ml-2 flex-shrink-0 ${
@@ -64,14 +67,14 @@ export function DownloadQueue() {
 
                 <div className="progress-bar mb-2">
                   <div
-                    className="progress-bar-fill"
-                    style={{ width: `${dl.percent || 0}%` }}
+                    className={`progress-bar-fill${!dl.totalBytes && dl.status === 'downloading' ? ' progress-bar-indeterminate' : ''}`}
+                    style={{ width: dl.totalBytes ? `${dl.percent || 0}%` : dl.status === 'downloading' ? '100%' : '0%' }}
                   />
                 </div>
 
                 <div className="flex items-center justify-between text-[10px] text-surface-400">
                   <span>{formatSpeed(dl.speed)}</span>
-                  <span>ETA: {formatEta(dl.eta)}</span>
+                  <span>{t('downloadQueue.eta', { time: formatEta(dl.eta) })}</span>
                 </div>
 
                 <div className="flex items-center gap-1 mt-2">

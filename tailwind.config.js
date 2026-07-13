@@ -65,4 +65,7 @@ export default {
     },
   },
   plugins: [],
+  future: {
+    hoverOnlyWhenSupported: true,
+  },
 };

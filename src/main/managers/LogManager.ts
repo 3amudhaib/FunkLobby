@@ -34,16 +34,31 @@ export class LogManager {
       return;
     }
     const prisma = getPrisma();
+    const timestamp = this.safeTimestamp();
     await prisma.log.create({
-      data: { level, message, details: details ? JSON.stringify(details) : null },
+      data: {
+        level,
+        message,
+        details: details ? JSON.stringify(details) : null,
+        createdAt: timestamp,
+      },
     });
+  }
+
+  private static safeTimestamp(): string {
+    try {
+      const ts = new Date().toISOString();
+      if (ts && typeof ts === 'string') return ts;
+    } catch {}
+    return Date.now().toString();
   }
 
   private static async log(level: string, message: string, details?: any) {
     try {
       await this.logToDb(level, message, details);
     } catch {
-      console.error(`[${level.toUpperCase()}] ${message}`, details || '');
+      const stamp = this.safeTimestamp();
+      console.error(`[${stamp}][${level.toUpperCase()}] ${message}`, details || '');
     }
   }
 

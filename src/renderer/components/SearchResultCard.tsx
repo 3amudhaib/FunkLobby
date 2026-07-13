@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Download, ExternalLink, FolderOpen, Trash2, Loader2, Eye, ThumbsUp } from 'lucide-react';
+import { ModCover } from './ModCover';
 import { useModStore } from '../stores/modStore';
+import { useTranslation } from '../hooks/useTranslation';
 
 interface SearchResultCardProps {
   mod: {
@@ -25,6 +27,7 @@ interface SearchResultCardProps {
 }
 
 export function SearchResultCard({ mod, index, focused }: SearchResultCardProps) {
+  const { t } = useTranslation();
   const [installing, setInstalling] = useState(false);
   const [justInstalled, setJustInstalled] = useState(false);
   const { installMod, uninstallMod } = useModStore();
@@ -40,7 +43,7 @@ export function SearchResultCard({ mod, index, focused }: SearchResultCardProps)
       setJustInstalled(true);
       setTimeout(() => setJustInstalled(false), 2000);
     } catch (err: any) {
-      console.error('Install failed:', err);
+      alert(err?.message || 'Installation failed');
     }
     setInstalling(false);
   };
@@ -66,17 +69,17 @@ export function SearchResultCard({ mod, index, focused }: SearchResultCardProps)
   };
 
   const formatCount = (n: number) => {
-    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-    if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + t('format.million');
+    if (n >= 1_000) return (n / 1_000).toFixed(1) + t('format.thousand');
     return String(n);
   };
 
   const formatDate = (dateStr: string) => {
     try {
       const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return 'Unknown';
+      if (isNaN(d.getTime())) return t('format.unknown');
       return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-    } catch { return 'Unknown'; }
+    } catch { return t('format.unknown'); }
   };
 
   const installed = mod.isInstalled || justInstalled;
@@ -93,16 +96,13 @@ export function SearchResultCard({ mod, index, focused }: SearchResultCardProps)
       }`}
     >
       <div className="w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 bg-surface-800">
-        {mod.thumbnailUrl ? (
-          <img src={mod.thumbnailUrl} alt="" className="w-full h-full object-cover"
-            loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-surface-500 text-xs font-bold"
-            style={{ background: fallbackColor }}>
-            {mod.title.charAt(0).toUpperCase()}
-          </div>
-        )}
+        <ModCover
+          modId={mod.id}
+          coverPath={(mod as any).coverPath}
+          thumbnailUrl={mod.thumbnailUrl}
+          title={mod.title}
+          fallback="letter"
+        />
       </div>
 
       <div className="flex-1 min-w-0">
@@ -114,7 +114,7 @@ export function SearchResultCard({ mod, index, focused }: SearchResultCardProps)
 
           <div className="flex items-center gap-1 flex-shrink-0">
             {mod.engine && <span className="badge-primary text-[10px]">{mod.engine}</span>}
-            {installed && <span className="badge-primary text-[10px] bg-emerald-500/20 text-emerald-400 border-emerald-500/30">Installed</span>}
+            {installed && <span className="badge-primary text-[10px] bg-emerald-500/20 text-emerald-400 border-emerald-500/30">{t('searchResult.installed')}</span>}
           </div>
         </div>
 
@@ -143,22 +143,22 @@ export function SearchResultCard({ mod, index, focused }: SearchResultCardProps)
               disabled={installing}
             >
               {installing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-              {installing ? 'Installing...' : 'Install'}
+              {installing ? t('searchResult.installing') : t('searchResult.install')}
             </button>
           ) : (
             <>
               <button className="btn-secondary text-[11px] h-7 px-3" onClick={handleOpenFolder}>
-                <FolderOpen className="w-3 h-3" /> Open Folder
+                <FolderOpen className="w-3 h-3" /> {t('searchResult.open')}
               </button>
               <button className="btn-secondary text-[11px] h-7 px-3" onClick={handleUninstall}>
-                <Trash2 className="w-3 h-3" /> Remove
+                <Trash2 className="w-3 h-3" /> {t('searchResult.uninstall')}
               </button>
             </>
           )}
           <button
             className="btn-ghost text-[11px] h-7 px-2 text-surface-400 hover:text-white"
             onClick={handleOpenGameBanana}
-            title="Open on GameBanana"
+            title={t('searchResult.viewOnGB')}
           >
             <ExternalLink className="w-3 h-3" />
           </button>

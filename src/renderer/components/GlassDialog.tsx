@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
+import { useTranslation } from '../hooks/useTranslation';
 
 interface GlassDialogProps {
   open: boolean;
@@ -11,6 +12,7 @@ interface GlassDialogProps {
 }
 
 export function GlassDialog({ open, onClose, title, children, maxWidth = 'max-w-lg' }: GlassDialogProps) {
+  const { t } = useTranslation();
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,6 +47,7 @@ export function GlassDialog({ open, onClose, title, children, maxWidth = 'max-w-
               <button
                 className="p-1.5 hover:bg-white/5 rounded-lg transition-colors"
                 onClick={onClose}
+                aria-label={t('glassDialog.close')}
               >
                 <X className="w-4 h-4 text-surface-400" />
               </button>

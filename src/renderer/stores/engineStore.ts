@@ -25,6 +25,8 @@ interface EngineState {
   catalog: any[];
   imageUrls: Record<string, string | null>;
   loading: boolean;
+  enginesLoaded: boolean;
+  catalogLoaded: boolean;
   error: string | null;
 
   fetchEngines: () => Promise<void>;
@@ -42,27 +44,38 @@ interface EngineState {
   repairEngine: (engineId: string) => Promise<void>;
   verifyEngine: (engineId: string) => Promise<any>;
   createShortcut: (engineId: string) => Promise<void>;
+  importExternalEngine: () => Promise<any>;
 }
 
 export const useEngineStore = create<EngineState>((set, get) => ({
   engines: [],
   catalog: [],
   imageUrls: {},
-  loading: false,
+  loading: true,
+  enginesLoaded: false,
+  catalogLoaded: false,
   error: null,
 
   fetchEngines: async () => {
     try {
       const engines = await window.electronAPI.getEngines();
-      set({ engines });
-    } catch { /* ignore */ }
+      set({ engines, enginesLoaded: true });
+    } catch {
+      set({ enginesLoaded: true });
+    }
+    const { catalogLoaded, enginesLoaded } = get();
+    if (catalogLoaded && enginesLoaded) set({ loading: false });
   },
 
   fetchCatalog: async () => {
     try {
       const catalog = await window.electronAPI.getEngineCatalog();
-      set({ catalog });
-    } catch { /* ignore */ }
+      set({ catalog, catalogLoaded: true });
+    } catch {
+      set({ catalogLoaded: true });
+    }
+    const { catalogLoaded, enginesLoaded } = get();
+    if (catalogLoaded && enginesLoaded) set({ loading: false });
   },
 
   fetchEngineImage: async (engineType: string) => {
@@ -138,5 +151,13 @@ export const useEngineStore = create<EngineState>((set, get) => ({
 
   createShortcut: async (engineId: string) => {
     await window.electronAPI.createEngineShortcut(engineId);
+  },
+
+  importExternalEngine: async () => {
+    const result = await window.electronAPI.importExternalEngine();
+    if (result) {
+      await get().fetchEngines();
+    }
+    return result;
   },
 }));
