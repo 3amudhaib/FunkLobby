@@ -1,30 +1,30 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Compass, ChevronDown, AlertCircle, WifiOff, RotateCcw } from 'lucide-react';
+import { Compass, AlertCircle, WifiOff, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SearchBar } from '../components/SearchBar';
 import { SearchFilters } from '../components/SearchFilters';
 import { SearchResultCard } from '../components/SearchResultCard';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { useSearchStore } from '../stores/searchStore';
-
 import { useModStore } from '../stores/modStore';
 import { useTranslation } from '../hooks/useTranslation';
+
+const MAX_VISIBLE_PAGES = 7;
 
 export function DiscoverPage() {
   const { t } = useTranslation();
   const {
-    query, results, total, hasMore, loading, error, offline,
+    query, results, total, page, totalPages, loading, error, offline,
     filters, focusedIndex,
-    setQuery, search, loadMore, clearResults, setFocusedIndex,
+    setQuery, search, goToPage, clearResults, setFocusedIndex,
   } = useSearchStore();
 
   const [showFilters, setShowFilters] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement>(null);
   const searchInitiated = useRef(false);
 
   const doSearch = useCallback(() => {
     searchInitiated.current = true;
-    search(false);
+    search();
   }, [search]);
 
   useEffect(() => {
@@ -33,18 +33,8 @@ export function DiscoverPage() {
   }, [query, filters]);
 
   useEffect(() => {
-    if (!sentinelRef.current || !hasMore || loading) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loading) {
-          loadMore();
-        }
-      },
-      { rootMargin: '400px' }
-    );
-    observer.observe(sentinelRef.current);
-    return () => observer.disconnect();
-  }, [hasMore, loading, results.length]);
+    clearResults();
+  }, []);
 
   const handleKeyNav = useCallback((direction: 'up' | 'down' | 'enter' | 'escape') => {
     if (direction === 'escape') {
@@ -74,7 +64,27 @@ export function DiscoverPage() {
     } catch { /* ignore */ }
   };
 
-  const showWelcome = !searchInitiated.current || (!query && results.length === 0 && !loading);
+  const visiblePages = useMemo(() => {
+    const pages: (number | 'ellipsis')[] = [];
+    const total = totalPages;
+    const current = page;
+    if (total <= MAX_VISIBLE_PAGES) {
+      for (let i = 1; i <= total; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      let start = Math.max(2, current - 2);
+      let end = Math.min(total - 1, current + 2);
+      if (current <= 3) { start = 2; end = Math.min(5, total - 1); }
+      if (current >= total - 2) { start = Math.max(total - 4, 2); end = total - 1; }
+      if (start > 2) pages.push('ellipsis');
+      for (let i = start; i <= end; i++) pages.push(i);
+      if (end < total - 1) pages.push('ellipsis');
+      pages.push(total);
+    }
+    return pages;
+  }, [page, totalPages]);
+
+  const showWelcome = !searchInitiated.current || (!query && results.length === 0 && !loading && !error);
 
   return (
     <div className="page-container pt-14">
@@ -147,15 +157,22 @@ export function DiscoverPage() {
             )}
           </div>
         ) : (
-          <div className="space-y-2">
-            {results.map((mod, i) => (
-              <SearchResultCard
-                key={mod.id}
-                mod={mod}
-                index={i}
-                focused={focusedIndex === i}
-              />
-            ))}
+          <div>
+            {total > 0 && (
+              <p className="text-xs text-surface-500 mb-3">
+                {total.toLocaleString()} mods found
+              </p>
+            )}
+            <div className="space-y-2">
+              {results.map((mod, i) => (
+                <SearchResultCard
+                  key={mod.id}
+                  mod={mod}
+                  index={i}
+                  focused={focusedIndex === i}
+                />
+              ))}
+            </div>
 
             {loading && (
               <div className="flex items-center justify-center py-6">
@@ -163,23 +180,60 @@ export function DiscoverPage() {
               </div>
             )}
 
-            {!loading && hasMore && (
-              <div ref={sentinelRef} className="flex items-center justify-center py-4">
-                <div className="flex items-center gap-2 text-surface-500 text-sm">
-                  <ChevronDown className="w-4 h-4" />
-                  {t('discover.loadMore')}
-                </div>
-              </div>
-            )}
-
-            {!hasMore && results.length > 0 && (
-              <p className="text-center text-surface-500 text-xs py-4">
-                {results.length >= 30 ? t('discover.resultsOf', { count: results.length, total }) : t('discover.results', { count: results.length })}
-              </p>
+            {totalPages > 1 && !loading && (
+              <Pagination
+                currentPage={page}
+                totalPages={totalPages}
+                visiblePages={visiblePages}
+                onPageChange={goToPage}
+              />
             )}
           </div>
         )}
       </motion.div>
+    </div>
+  );
+}
+
+function Pagination({ currentPage, totalPages, visiblePages, onPageChange }: {
+  currentPage: number;
+  totalPages: number;
+  visiblePages: (number | 'ellipsis')[];
+  onPageChange: (page: number) => void;
+}) {
+  return (
+    <div className="flex items-center justify-center gap-1.5 mt-6 pb-4">
+      <button
+        className={`pagination-btn ${currentPage <= 1 ? 'opacity-30 cursor-not-allowed' : ''}`}
+        disabled={currentPage <= 1}
+        onClick={() => onPageChange(currentPage - 1)}
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </button>
+      {visiblePages.map((p, i) =>
+        p === 'ellipsis' ? (
+          <span key={`ellipsis-${i}`} className="px-1 text-surface-500 text-sm">...</span>
+        ) : (
+          <button
+            key={p}
+            className={`pagination-btn min-w-[32px] ${
+              p === currentPage
+                ? 'bg-primary-500/20 text-primary-300 border-primary-500/30'
+                : 'text-surface-400 border-surface-700/30 hover:border-surface-600/50'
+            }`}
+            onClick={() => onPageChange(p)}
+          >
+            {p}
+          </button>
+        )
+      )}
+      <button
+        className={`pagination-btn ${currentPage >= totalPages ? 'opacity-30 cursor-not-allowed' : ''}`}
+        disabled={currentPage >= totalPages}
+        onClick={() => onPageChange(currentPage + 1)}
+      >
+        <ChevronRight className="w-4 h-4" />
+      </button>
     </div>
   );
 }

@@ -8,7 +8,7 @@ import { getPrisma } from './PrismaManager';
 import { LogManager } from './LogManager';
 import { ExtractionManager } from './ExtractionManager';
 import { asyncFs } from '../asyncFs';
-import { ENGINE_CATALOG, EngineCatalogEntry, classifyEngineInstallMethod } from '../../shared/engineTypes';
+import { ENGINE_CATALOG, ENGINE_DETECT_CONFIG, EngineCatalogEntry, classifyEngineInstallMethod } from '../../shared/engineTypes';
 import { STANDALONE_ENGINE_ID } from '../../shared/constants';
 import { loadReleaseFromCache } from './engineReleaseCache';
 
@@ -48,8 +48,11 @@ const BINARY_ASSET_MAP: Record<string, { binaryHint: string; exeName: string }> 
   slushi: { binaryHint: 'Win64', exeName: 'SlushiEngine.exe' },
   troll: { binaryHint: 'windowsBuild', exeName: 'TrollEngine.exe' },
   universe: { binaryHint: 'Windows', exeName: 'UniverseEngine.exe' },
-  'v-slice': { binaryHint: 'Windows', exeName: 'V-Slice.exe' },
+  'v-slice': { binaryHint: 'windows', exeName: 'P-Slice.exe' },
   'funkin-plus-plus': { binaryHint: 'Windows', exeName: 'PlusEngine.exe' },
+  'fps-plus': { binaryHint: 'fpsplus', exeName: 'FPSPlus.exe' },
+  'micd-up': { binaryHint: 'mic.dUP', exeName: "Mic'd Up.exe" },
+  vanilla: { binaryHint: 'windows', exeName: 'Funkin.exe' },
 };
 
 function getEnginesRoot(): string {
@@ -88,17 +91,24 @@ export class EngineManager {
     const results: EngineCatalogEntry[] = [];
     for (const entry of entries) {
       if (!entry.repoOwner || !entry.repoName) {
-        // Skip entries without a repo — they don't support auto-install
+        entry.installMethod = entry.downloadUrl ? 'direct_download' : 'manual';
+        entry.supported = true;
+        entry.repoUrl = entry.websiteUrl;
+        results.push(entry);
         continue;
       }
       // Validate the repository exists and is not archived
       const validation = await this.getCachedValidation(entry.repoOwner, entry.repoName);
-      // Only skip entries that are definitively invalid (API explicitly returned invalid)
-      // If API is unreachable (null), assume repo is valid since it's in the hardcoded catalog
       if (validation && !validation.valid) {
+        entry.supported = true;
+        entry.repoUrl = `https://github.com/${entry.repoOwner}/${entry.repoName}`;
+        results.push(entry);
         continue;
       }
       if (validation && validation.archived) {
+        entry.supported = true;
+        entry.repoUrl = `https://github.com/${entry.repoOwner}/${entry.repoName}`;
+        results.push(entry);
         continue;
       }
       // Use the validated (possibly redirected) repo URL
@@ -112,21 +122,19 @@ export class EngineManager {
       } else {
         entry.repoUrl = `https://github.com/${entry.repoOwner}/${entry.repoName}`;
       }
-      const release = await this.getCachedRelease(entry.repoOwner, entry.repoName);
-      const method = classifyEngineInstallMethod(entry, release);
-      entry.installMethod = method;
       const bam = BINARY_ASSET_MAP[entry.id];
       if (bam) {
         entry.binaryAssetName = bam.binaryHint;
         entry.executableName = bam.exeName;
       }
-      // Mark as supported if we have a viable install method
+      const release = await this.getCachedRelease(entry.repoOwner, entry.repoName);
+      const method = classifyEngineInstallMethod(entry, release);
+      entry.installMethod = method;
+      // Mark as supported — all engines can be installed (auto-download or manual import)
       if (method === 'binary' || method === 'direct_download') {
         entry.supported = true;
-      } else if (!release && entry.repoOwner && entry.repoName) {
-        // Release API was unreachable — don't enable install since it would fail
-        entry.supported = false;
-        entry.installDisabledReason = 'Unable to fetch release info from GitHub. Check your connection and try again.';
+      } else {
+        entry.supported = true;
       }
       results.push(entry);
     }
@@ -276,13 +284,27 @@ export class EngineManager {
   private static async installEngineImpl(engineType: string): Promise<void> {
     const entry = ENGINE_CATALOG.find(e => e.id === engineType);
     if (!entry) throw new Error(`Unknown engine: ${engineType}`);
-    if (entry.downloadType === 'manual') throw new Error(`${entry.name} does not support automatic installation. Download it manually from ${entry.websiteUrl || 'the official website'}.`);
+
+    // If a direct downloadUrl is set on the catalog entry, bypass all manual/repo checks
+    // and go straight to the auto-download-and-install flow
+    if (entry.downloadUrl) {
+      await this.directDownloadAndInstall(entry);
+      return;
+    }
+
+    if (entry.downloadType === 'manual') {
+      const imported = await this.importExternalEngine();
+      if (!imported) throw new Error('Import cancelled.');
+      return;
+    }
 
     try {
       if (entry.repoOwner && entry.repoName) {
         const validation = await this.getCachedValidation(entry.repoOwner, entry.repoName);
         if (validation && !validation.valid) {
-          throw new Error(`${entry.name} repository is not available. Install it manually instead.`);
+          const imported = await this.importExternalEngine();
+          if (!imported) throw new Error('Import cancelled.');
+          return;
         }
       }
 
@@ -292,18 +314,18 @@ export class EngineManager {
         await new Promise(r => setTimeout(r, this.API_RETRY_DELAY_MS));
         release = await this.getCachedRelease(entry.repoOwner, entry.repoName);
       }
+      // Populate binary asset hints so classifyEngineInstallMethod can match
+      // asset names like 'fpsplus_v9_0_0.zip' against the known binary hint
+      const bam = BINARY_ASSET_MAP[entry.id];
+      if (bam) {
+        entry.binaryAssetName = bam.binaryHint;
+        entry.executableName = bam.exeName;
+      }
       const method = classifyEngineInstallMethod(entry, release);
-      if (method === 'source_only') {
-        throw new Error(`${entry.name} only provides source code. Build it manually from the official repository.`);
-      }
-      if (method === 'no_releases') {
-        const bam = BINARY_ASSET_MAP[entry.id];
-        if (!bam) {
-          throw new Error(`${entry.name} has no downloadable releases on GitHub.`);
-        }
-      }
-      if (method === 'unknown_repo') {
-        throw new Error(`${entry.name} has no downloadable releases on GitHub.`);
+      if (method === 'source_only' || method === 'no_releases' || method === 'unknown_repo') {
+        const imported = await this.importExternalEngine();
+        if (!imported) throw new Error('Import cancelled.');
+        return;
       }
 
       const prisma = getPrisma();
@@ -372,6 +394,74 @@ export class EngineManager {
     }
   }
 
+  /**
+   * Install an engine that has a direct downloadUrl (no GitHub release needed).
+   * Creates a DB record, streams the zip from the URL, extracts, finds the exe,
+   * cleans up the temp zip, and updates the DB to 'installed'.
+   */
+  private static async directDownloadAndInstall(entry: EngineCatalogEntry): Promise<void> {
+    const engineType = entry.id;
+    const prisma = getPrisma();
+
+    const existing = await prisma.engine.findFirst({ where: { type: engineType } });
+    const now = new Date().toISOString();
+
+    if (existing) {
+      await prisma.engine.update({
+        where: { id: existing.id },
+        data: { status: 'downloading', error: null, version: null, installPath: null },
+      });
+    } else {
+      await prisma.engine.create({
+        data: {
+          name: entry.name,
+          type: engineType,
+          description: entry.description,
+          author: entry.maintainers.length > 0 ? entry.maintainers.join(', ') : 'Unknown',
+          repoUrl: entry.repoUrl || entry.websiteUrl || null,
+          websiteUrl: entry.websiteUrl,
+          license: entry.license,
+          features: JSON.stringify(entry.features),
+          platforms: JSON.stringify(entry.platforms),
+          status: 'downloading',
+          version: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    }
+
+    const result = await this.downloadAndInstall(entry, null);
+
+    if (result.success) {
+      await prisma.engine.updateMany({
+        where: { type: engineType },
+        data: {
+          status: 'installed',
+          version: result.version,
+          installPath: result.installPath,
+          exePath: result.exePath,
+          error: null,
+          installedAt: now,
+          lastUpdatedAt: now,
+        },
+      });
+      this.verifyHealthAfterLaunch(result.exePath!, result.installPath!).catch(() => {});
+    } else {
+      await prisma.engine.updateMany({
+        where: { type: engineType },
+        data: {
+          status: 'download_failed',
+          error: result.error || 'Installation failed',
+          version: null,
+          installPath: null,
+          exePath: null,
+        },
+      });
+      throw new Error(result.error || 'Installation failed');
+    }
+  }
+
   private static async downloadAndInstall(entry: EngineCatalogEntry, release: GitHubRelease | null): Promise<InstallResult> {
     const engineType = entry.id;
     const prisma = getPrisma();
@@ -429,6 +519,7 @@ export class EngineManager {
 
       LogManager.info('Downloading engine', { engineType, url: downloadUrl.substring(0, 100) });
 
+      this.sendInstallProgress(engineType, 0, 'downloading');
       const zipPath = path.join(tempDir, `${entry.id}.zip`);
       const response = await axios({
         method: 'GET',
@@ -439,6 +530,7 @@ export class EngineManager {
         maxRedirects: 5,
         onDownloadProgress: (progressEvent) => {
           const pct = progressEvent.total ? Math.round((progressEvent.loaded / progressEvent.total) * 100) : 0;
+          this.sendInstallProgress(engineType, pct, 'downloading');
           if (Date.now() - startLog > 5000) LogManager.info(`Download progress`, { engineType, pct });
         },
       });
@@ -464,6 +556,7 @@ export class EngineManager {
         return { success: false, error: `Download incomplete: got ${Math.round(zipSize / totalSize * 100)}% of expected ${totalSize} bytes` };
       }
 
+      this.sendInstallProgress(engineType, 100, 'extracting');
       LogManager.info('Extracting engine', { engineType, zipPath });
 
       const extractDir = path.join(tempDir, 'extracted');
@@ -492,6 +585,7 @@ export class EngineManager {
       const extractElapsed = Date.now() - startLog - dlElapsed;
       if (extractElapsed > 100) LogManager.info(`Timing: extract took ${extractElapsed}ms`, { engineType });
 
+      this.sendInstallProgress(engineType, 100, 'installing');
       LogManager.info('Scanning for executable', { engineType, installDir });
 
       const exePath = await this.findEngineExeRecursiveAsync(installDir);
@@ -985,29 +1079,12 @@ export class EngineManager {
       process.env.APPDATA || '',
       getEnginesRoot(),
     ];
+    const alreadyDetected = new Set<string>();
 
     for (const basePath of searchPaths) {
       if (!basePath || !await asyncFs.exists(basePath).catch(() => false)) continue;
-      for (const catalogEntry of ENGINE_CATALOG) {
-        for (const detectFile of catalogEntry.detectFiles) {
-          const result = await this.findFileAsync(basePath, detectFile);
-          if (result) {
-            const installPath = path.dirname(result);
-            const exePath = await this.findEngineExe(installPath);
-            detected.push({
-              name: catalogEntry.name, type: catalogEntry.id, path: installPath, exePath,
-              version: null, isCustom: false, isDetected: true,
-              description: catalogEntry.description,
-              author: catalogEntry.maintainers.join(', '),
-              repoUrl: catalogEntry.repoOwner && catalogEntry.repoName ? `https://github.com/${catalogEntry.repoOwner}/${catalogEntry.repoName}` : null,
-              websiteUrl: catalogEntry.websiteUrl, license: catalogEntry.license,
-              features: JSON.stringify(catalogEntry.features),
-              platforms: JSON.stringify(catalogEntry.platforms),
-            });
-            break;
-          }
-        }
-      }
+      const result = await this.detectEngineInPath(basePath, alreadyDetected);
+      detected.push(...result);
     }
 
     await this.storeDetectedEngines(detected);
@@ -1015,19 +1092,83 @@ export class EngineManager {
     return detected;
   }
 
-  private static async findFileAsync(basePath: string, fileName: string, maxDepth = 4): Promise<string | null> {
+  private static async detectEngineInPath(basePath: string, alreadyDetected: Set<string>, depth = 0): Promise<any[]> {
+    if (depth > 3) return [];
+    const found: any[] = [];
+
     try {
       const entries = await asyncFs.readdir(basePath, { withFileTypes: true }) as fs.Dirent[];
+      const dirs: string[] = [];
+      let fileNames = '';
+
       for (const entry of entries) {
         const fullPath = path.join(basePath, entry.name);
-        if (entry.isFile() && entry.name.toLowerCase() === fileName.toLowerCase()) return fullPath;
-        if (entry.isDirectory() && maxDepth > 0 && !entry.name.startsWith('.') && !entry.name.startsWith('$')) {
-          const result = await this.findFileAsync(fullPath, fileName, maxDepth - 1);
-          if (result) return result;
+        if (entry.name.startsWith('.') || entry.name.startsWith('$')) continue;
+        if (entry.isDirectory()) {
+          dirs.push(fullPath);
+        } else if (entry.isFile()) {
+          fileNames += entry.name.toLowerCase() + '|';
         }
       }
+
+      for (const detectEntry of ENGINE_DETECT_CONFIG) {
+        if (alreadyDetected.has(detectEntry.id)) continue;
+
+        for (const detectFile of detectEntry.detectFiles) {
+          if (fileNames.includes(detectFile.toLowerCase())) {
+            const installPath = basePath;
+            const exePath = await this.findEngineExe(installPath);
+            const catalogEntry = ENGINE_CATALOG.find(e => e.id === detectEntry.id);
+            found.push({
+              name: detectEntry.name, type: detectEntry.id, path: installPath, exePath,
+              version: null, isCustom: false, isDetected: true,
+              description: catalogEntry?.description || '',
+              author: catalogEntry?.maintainers.join(', ') || '',
+              repoUrl: catalogEntry?.repoOwner && catalogEntry?.repoName ? `https://github.com/${catalogEntry.repoOwner}/${catalogEntry.repoName}` : null,
+              websiteUrl: catalogEntry?.websiteUrl || null,
+              license: catalogEntry?.license || null,
+              features: catalogEntry ? JSON.stringify(catalogEntry.features) : null,
+              platforms: catalogEntry ? JSON.stringify(catalogEntry.platforms) : null,
+            });
+            alreadyDetected.add(detectEntry.id);
+            break;
+          }
+        }
+
+        if (alreadyDetected.has(detectEntry.id)) continue;
+
+        for (const detectFolder of detectEntry.detectFolders) {
+          if (fileNames.includes(detectFolder.toLowerCase() + '|')) {
+            continue;
+          }
+          if (basePath.toLowerCase().includes(detectFolder.toLowerCase())) {
+            const exePath = await this.findEngineExe(basePath);
+            const catalogEntry = ENGINE_CATALOG.find(e => e.id === detectEntry.id);
+            found.push({
+              name: detectEntry.name, type: detectEntry.id, path: basePath, exePath,
+              version: null, isCustom: false, isDetected: true,
+              description: catalogEntry?.description || '',
+              author: catalogEntry?.maintainers.join(', ') || '',
+              repoUrl: catalogEntry?.repoOwner && catalogEntry?.repoName ? `https://github.com/${catalogEntry.repoOwner}/${catalogEntry.repoName}` : null,
+              websiteUrl: catalogEntry?.websiteUrl || null,
+              license: catalogEntry?.license || null,
+              features: catalogEntry ? JSON.stringify(catalogEntry.features) : null,
+              platforms: catalogEntry ? JSON.stringify(catalogEntry.platforms) : null,
+            });
+            alreadyDetected.add(detectEntry.id);
+            break;
+          }
+        }
+      }
+
+      for (const dir of dirs) {
+        if (alreadyDetected.size >= ENGINE_DETECT_CONFIG.length) break;
+        const sub = await this.detectEngineInPath(dir, alreadyDetected, depth + 1);
+        found.push(...sub);
+      }
     } catch {}
-    return null;
+
+    return found;
   }
 
   private static async storeDetectedEngines(engines: any[]) {
@@ -1240,6 +1381,7 @@ export class EngineManager {
       { id: 'troll', name: 'Troll Engine', exes: ['trollengine', 'troll'] },
       { id: 'universe', name: 'Universe Engine', exes: ['universeengine', 'universe'] },
       { id: 'funkin-plus-plus', name: 'Funkin Plus Plus', exes: ['plusengine', 'funkinplusplus', 'funkin+', 'funkin plus'] },
+      { id: 'v-slice', name: 'V-Slice', exes: ['vslice', 'v-slice', 'v'] },
     ];
 
     for (const known of knownEngines) {

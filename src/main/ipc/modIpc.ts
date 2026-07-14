@@ -875,6 +875,7 @@ async function detectModEngine(folderPath: string): Promise<string | null> {
             'troll': 'troll', 'trollengine': 'troll',
             'universe': 'universe', 'universeengine': 'universe',
             'plusengine': 'funkin-plus-plus', 'funkinplusplus': 'funkin-plus-plus',
+            'vslice': 'v-slice', 'v-slice': 'v-slice', 'vsliceengine': 'v-slice',
           };
           return engineMap[engineType] || engineType;
         }
@@ -889,6 +890,7 @@ async function detectModEngine(folderPath: string): Promise<string | null> {
           const val = (parsed.engine || parsed.type).toLowerCase();
           if (val.includes('psych')) return 'psych';
           if (val.includes('codename')) return 'codename';
+          if (val.includes('v-slice') || val.includes('vslice')) return 'v-slice';
         }
       } catch {}
     }
@@ -908,6 +910,7 @@ async function detectModEngine(folderPath: string): Promise<string | null> {
         if (lower.includes('troll')) return 'troll';
         if (lower.includes('universe')) return 'universe';
         if (lower.includes('plus') || lower.includes('funkin++')) return 'funkin-plus-plus';
+        if (lower.includes('vslice') || lower.includes('v-slice')) return 'v-slice';
       } catch {}
     }
 
@@ -918,6 +921,7 @@ async function detectModEngine(folderPath: string): Promise<string | null> {
         const lower = content.toLowerCase();
         if (lower.includes('psych')) return 'psych';
         if (lower.includes('codename')) return 'codename';
+        if (lower.includes('vslice') || lower.includes('v-slice')) return 'v-slice';
       } catch {}
     }
 

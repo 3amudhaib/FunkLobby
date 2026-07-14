@@ -4,6 +4,7 @@ import { Download, ExternalLink, FolderOpen, Trash2, Loader2, Eye, ThumbsUp } fr
 import { ModCover } from './ModCover';
 import { useModStore } from '../stores/modStore';
 import { useTranslation } from '../hooks/useTranslation';
+import { getEngineBadge } from '../utils/engineBadges';
 
 interface SearchResultCardProps {
   mod: {
@@ -113,7 +114,10 @@ export function SearchResultCard({ mod, index, focused }: SearchResultCardProps)
           </div>
 
           <div className="flex items-center gap-1 flex-shrink-0">
-            {mod.engine && <span className="badge-primary text-[10px]">{mod.engine}</span>}
+            {(() => {
+              const badge = getEngineBadge(mod.engine);
+              return <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.bg} ${badge.color} ${badge.border}`}>{badge.label}</span>;
+            })()}
             {installed && <span className="badge-primary text-[10px] bg-emerald-500/20 text-emerald-400 border-emerald-500/30">{t('searchResult.installed')}</span>}
           </div>
         </div>

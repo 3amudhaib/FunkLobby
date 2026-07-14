@@ -237,6 +237,7 @@
   "engines.updateAvailable": "Update available: v{current} → v{latest}",
   "engines.verificationFailed": "Verification failed",
   "engines.install": "Install",
+  "engines.openDownload": "Open Download Page",
   "engines.launch": "Launch",
   "engines.checkUpdates": "Check for Updates",
   "engines.update": "Update",

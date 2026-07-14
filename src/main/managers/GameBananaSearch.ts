@@ -17,13 +17,10 @@ const ENGINE_CATALOG_LIST = [
   { id: 'slushi', name: 'Slushi Engine', detect: ['slushi engine', 'slushiengine'] },
   { id: 'troll', name: 'Troll Engine', detect: ['troll engine', 'trollengine'] },
   { id: 'shadow', name: 'Shadow Engine', detect: ['shadow engine', 'shadowengine'] },
-  { id: 'solar', name: 'Solar Engine', detect: ['solar engine', 'solarenigne'] },
   { id: 'shattered', name: 'Shattered Engine', detect: ['shattered engine', 'shatteredengine'] },
-  { id: 'universe', name: 'Universe Engine', detect: ['universe engine', 'universeengine'] },
-  { id: 'kade', name: 'Kade Engine', detect: ['kade engine', 'kadeengine', 'kade'] },
+  { id: 'universe', name: 'Solar Engine', detect: ['solar engine', 'solarenengine', 'universe engine', 'universeengine'] },
   { id: 'forever', name: 'Forever Engine', detect: ['forever engine', 'forever'] },
   { id: 'v-slice', name: 'V-Slice', detect: ['v slice', 'v-slice', 'vslice'] },
-  { id: 'leather', name: 'Leather Engine', detect: ['leather engine', 'leather'] },
   { id: 'fps-plus', name: 'FPS Plus', detect: ['fps plus', 'fpsplus'] },
   { id: 'js-engine', name: 'JS Engine', detect: ['js engine'] },
   { id: 'fnf-love', name: 'FNF Love Engine', detect: ['fnf love', 'fnf love engine'] },
@@ -35,6 +32,10 @@ const EXCLUDED_CATEGORIES = new Set([
   'Scripts',
   'GUIs',
   'Psych Engine',
+  'Templates',
+  'Libraries',
+  'Source',
+  'Framework',
 ]);
 
 const PLAYABLE_CATEGORIES_PREFIX = [
@@ -49,9 +50,19 @@ const PLAYABLE_CATEGORIES_PREFIX = [
   'WIPs',
 ];
 
+const MOBILE_KEYWORDS = [
+  'android', 'apk', 'aab', 'mobile', 'phone', 'ios', 'iphone', 'ipad',
+  'touch', 'portable', 'phone-friendly',
+];
+
+const EXCLUDED_CONTENT_KEYWORDS = [
+  'engine download', 'engine source', 'source code', 'template', 'boilerplate',
+  'api wrapper', 'sdk', 'library for', 'framework for',
+];
+
 /**
- * Validate that a GameBanana item is a playable FNF mod using structural metadata.
- * Only items with _sModelName === 'Mod' and a valid mod category pass.
+ * Validate that a GameBanana item is a Windows PC-compatible playable FNF mod.
+ * Excludes mobile ports, engines, tools, templates, libraries, and source code.
  */
 function isPlayableMod(mod: any): boolean {
   if (!mod) return false;
@@ -62,12 +73,24 @@ function isPlayableMod(mod: any): boolean {
   if (EXCLUDED_CATEGORIES.has(gbCat)) return false;
 
   // Accept items in recognized playable mod categories
+  let inPlayableCategory = false;
   for (const prefix of PLAYABLE_CATEGORIES_PREFIX) {
-    if (gbCat.startsWith(prefix)) return true;
+    if (gbCat.startsWith(prefix)) {
+      inPlayableCategory = true;
+      break;
+    }
   }
+  if (!inPlayableCategory) return false;
 
-  // Fallback: reject everything else unless explicitly a known Gb item type
-  return false;
+  // Check title + description for mobile/excluded keywords
+  const title = (mod._sName || mod.name || '').toLowerCase();
+  const desc = (mod._sDescription || mod._sText || mod.text || '').toLowerCase();
+  const haystack = title + ' ' + desc;
+
+  if (MOBILE_KEYWORDS.some(kw => haystack.includes(kw))) return false;
+  if (EXCLUDED_CONTENT_KEYWORDS.some(kw => haystack.includes(kw))) return false;
+
+  return true;
 }
 
 const CATEGORY_MAP: Record<string, string> = {
@@ -85,6 +108,12 @@ const CATEGORY_MAP: Record<string, string> = {
   'GUIs': 'UI',
   'Mod Folders': 'Mod',
   'Psych Engine': 'Engine',
+  'Templates': 'Template',
+  'Libraries': 'Library',
+  'Source': 'Source',
+  'Framework': 'Framework',
+  'APKs': 'Mobile',
+  'AABs': 'Mobile',
 };
 
 const CATEGORY_BY_UI: Record<string, string[]> = {};
@@ -95,21 +124,22 @@ for (const [gb, ui] of Object.entries(CATEGORY_MAP)) {
 
 const ENGINE_KEYWORDS: Array<{ keywords: string[]; engineId: string }> = [
   { keywords: ['psych engine', 'psychengine'], engineId: 'psych' },
-  { keywords: ['kade engine', 'kadeengine', 'kade'], engineId: 'kade' },
   { keywords: ['codename engine', 'codename'], engineId: 'codename' },
   { keywords: ['forever engine', 'forever'], engineId: 'forever' },
-  { keywords: ['leather engine', 'leather'], engineId: 'leather' },
-  { keywords: ['v-slice', 'vslice'], engineId: 'v-slice' },
+  { keywords: ['v-slice', 'vslice', 'v slice'], engineId: 'v-slice' },
   { keywords: ['p-slice', 'pslice', 'p slice'], engineId: 'p-slice' },
   { keywords: ['fnf love', 'fnf love engine'], engineId: 'fnf-love' },
-  { keywords: ['js engine', 'js engine'], engineId: 'js-engine' },
-  { keywords: ['fps plus', 'fpsplus'], engineId: 'fps-plus' },
+  { keywords: ['js engine', 'jsengine'], engineId: 'js-engine' },
+  { keywords: ['fps plus', 'fpsplus', 'fps+'], engineId: 'fps-plus' },
+  { keywords: ['mic\'d up', 'micdup', 'micd up'], engineId: 'micd-up' },
+  { keywords: ['vanilla', 'base game'], engineId: 'vanilla' },
   { keywords: ['pe achieved'], engineId: 'psych' },
   { keywords: ['popcorn engine', 'popcorn'], engineId: 'psych' },
   { keywords: ['haxe engine'], engineId: 'psych' },
   { keywords: ['flixel'], engineId: 'psych' },
   { keywords: ['ale-psych', 'ale psych'], engineId: 'ale-psych' },
-  { keywords: ['basegame', 'base game'], engineId: 'basegame' },
+  { keywords: ['basegame', 'base game'], engineId: 'vanilla' },
+  { keywords: ['mod folders'], engineId: 'standalone' },
 ];
 
 type SortId = 'trending' | 'popular' | 'updated' | 'newest' | 'name' | 'downloads';
@@ -154,7 +184,7 @@ export function detectEngineFromMod(record: any): string {
       }
     }
   }
-  return 'psych';
+  return 'standalone';
 }
 
 interface SearchParams {
@@ -192,7 +222,7 @@ const detailsCache = new Map<number, { data: any; timestamp: number }>();
 const DETAILS_CACHE_TTL = 300_000;
 
 function searchCacheKey(p: SearchParams): string {
-  return `${p.query || ''}|${p.category || ''}|${p.engine || ''}|${p.sortBy || 'trending'}|${p.page || 1}|${p.limit || 30}`;
+  return `${p.query || ''}|${p.category || ''}|${p.engine || ''}|${p.sortBy || 'trending'}|${p.page || 1}|${p.limit || 48}`;
 }
 
 export class GameBananaSearch {
@@ -221,7 +251,7 @@ export class GameBananaSearch {
 
   private static async browseModsViaIndex(params: SearchParams): Promise<SearchResult> {
     const page = params.page || 1;
-    const limit = Math.min(params.limit || 30, 50);
+    const limit = Math.min(params.limit || 48, 50);
 
     const apiParams: Record<string, any> = {
       '_aFilters[Generic_Game]': FNF_GAME_ID,
@@ -258,7 +288,7 @@ export class GameBananaSearch {
   }
 
   private static async searchModsViaSearch(params: SearchParams): Promise<SearchResult> {
-    const limit = Math.min(params.limit || 30, 50);
+    const limit = Math.min(params.limit || 48, 50);
     const fetchLimit = Math.min(Math.max(limit, 50), 50);
     const page = params.page || 1;
 
@@ -568,7 +598,7 @@ export class GameBananaSearch {
 
   private static async fallbackToLocalDB(params: SearchParams): Promise<SearchResult> {
     const page = params.page || 1;
-    const limit = Math.min(params.limit || 30, 50);
+    const limit = Math.min(params.limit || 48, 50);
     try {
       const prisma = getPrisma();
       const where: any = {};

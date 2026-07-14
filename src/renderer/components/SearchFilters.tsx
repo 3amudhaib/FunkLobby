@@ -14,14 +14,23 @@ const SORT_OPTIONS = [
 const ENGINES = [
   { id: '', label: 'All Engines' },
   { id: 'psych', label: 'Psych Engine' },
-  { id: 'kade', label: 'Kade Engine' },
   { id: 'codename', label: 'Codename Engine' },
+  { id: 'cdev', label: 'CDEV Engine' },
   { id: 'forever', label: 'Forever Engine' },
-  { id: 'leather', label: 'Leather Engine' },
   { id: 'v-slice', label: 'V-Slice' },
+  { id: 'fps-plus', label: 'FPS Plus' },
+  { id: 'micd-up', label: "Mic'd Up" },
+  { id: 'yoshicrafter', label: 'YoshiCrafter Engine' },
+  { id: 'dragon', label: 'Dragon Engine' },
+  { id: 'shadow', label: 'Shadow Engine' },
+  { id: 'shattered', label: 'Shattered Engine' },
+  { id: 'slushi', label: 'Slushi Engine' },
+  { id: 'troll', label: 'Troll Engine' },
+  { id: 'universe', label: 'Solar Engine' },
+  { id: 'vanilla', label: 'Vanilla' },
   { id: 'js-engine', label: 'JS Engine' },
   { id: 'fnf-love', label: 'FNF Love' },
-  { id: 'fps-plus', label: 'FPS Plus' },
+  { id: 'standalone', label: 'Standalone' },
 ];
 
 interface SearchFiltersProps {

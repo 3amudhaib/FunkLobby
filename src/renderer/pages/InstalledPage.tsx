@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getEngineBadge } from '../utils/engineBadges';
 import { motion } from 'framer-motion';
 import { Play, FolderOpen, MoreVertical, FileInput, FileOutput, Download, Package, Copy, Trash2, ToggleLeft, ToggleRight, Undo2, FolderSync, ShieldCheck, Wrench, Image, ImageOff } from 'lucide-react';
 import { LoadingSpinner } from '../components/LoadingSpinner';
@@ -101,9 +102,7 @@ export function InstalledPage() {
                   <h3 className="text-sm font-semibold text-white truncate">{mod.title}</h3>
                   <p className="text-[11px] text-surface-400">{mod.author} &middot; v{mod.version}</p>
                   <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary-500/10 text-primary-300">
-                      {mod.engine}
-                    </span>
+                    {(() => { const b = getEngineBadge(mod.engine); return <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.bg} ${b.color} ${b.border}`}>{b.label}</span>; })()}
                     {mod.fileSize > 0 && (
                       <span className="text-[10px] text-surface-500">{formatBytes(mod.fileSize)}</span>
                     )}

@@ -5,6 +5,7 @@ import { Download, Clock, HardDrive, Image, ImageOff, RotateCcw } from 'lucide-r
 import { formatBytes, formatNumber, formatDate } from '../utils/format';
 import { ModCover } from './ModCover';
 import { useTranslation } from '../hooks/useTranslation';
+import { getEngineBadge } from '../utils/engineBadges';
 
 interface ModCardProps {
   mod: any;
@@ -122,11 +123,10 @@ export function ModCard({ mod, index = 0 }: ModCardProps) {
             </div>
 
             <div className="flex items-center gap-1.5 mt-2">
-              {mod.engine && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary-500/10 text-primary-300 border border-primary-500/20">
-                  {mod.engine}
-                </span>
-              )}
+              {(() => {
+                const badge = getEngineBadge(mod.engine);
+                return <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.bg} ${badge.color} ${badge.border}`}>{badge.label}</span>;
+              })()}
               {mod.category && mod.category !== 'Other' && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-700/50 text-surface-300 border border-surface-600/30">
                   {mod.category}

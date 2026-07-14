@@ -251,10 +251,7 @@ export class InstallerManager {
       'universe': 'universe', 'universeengine': 'universe', 'universe engine': 'universe',
       'plusengine': 'funkin-plus-plus', 'funkinplusplus': 'funkin-plus-plus', 'funkin++': 'funkin-plus-plus',
       'vslice': 'v-slice', 'v-slice': 'v-slice',
-      'kade': 'kade', 'kadeengine': 'kade', 'kade engine': 'kade',
       'forever': 'forever', 'foreverengine': 'forever', 'forever engine': 'forever',
-      'leather': 'leather', 'leatherengine': 'leather', 'leather engine': 'leather',
-      'solar': 'solar', 'solarenigne': 'solar', 'solar engine': 'solar',
       'fps-plus': 'fps-plus', 'fpsplus': 'fps-plus', 'fps plus': 'fps-plus',
       'js-engine': 'js-engine', 'jsengine': 'js-engine', 'js engine': 'js-engine',
       'fnf-love': 'fnf-love', 'fnflove': 'fnf-love', 'fnf love': 'fnf-love', 'fnf love engine': 'fnf-love',
@@ -341,9 +338,7 @@ export class InstallerManager {
     if (lower.includes('slushi')) return 'slushi';
     if (lower.includes('troll')) return 'troll';
     if (lower.includes('universe')) return 'universe';
-    if (lower.includes('kade')) return 'kade';
     if (lower.includes('forever')) return 'forever';
-    if (lower.includes('leather')) return 'leather';
     if (lower.includes('fps') && lower.includes('plus')) return 'fps-plus';
     if (lower.includes('js') && lower.includes('engine')) return 'js-engine';
     if (lower.includes('fnf love') || lower.includes('love engine')) return 'fnf-love';
@@ -361,11 +356,8 @@ export class InstallerManager {
     if (lowerContent.includes('slushi')) return 'slushi';
     if (lowerContent.includes('troll')) return 'troll';
     if (lowerContent.includes('universe')) return 'universe';
-    if (lowerContent.includes('kade')) return 'kade';
     if (lowerContent.includes('forever')) return 'forever';
-    if (lowerContent.includes('leather')) return 'leather';
     if (lowerContent.includes('yoshie') || lowerContent.includes('yoshi')) return 'yoshicrafter';
-    if (lowerContent.includes('solar')) return 'solar';
     if (lowerContent.includes('fps') && lowerContent.includes('plus')) return 'fps-plus';
     if (lowerContent.includes('js')) return 'js-engine';
     if (lowerContent.includes('fnf love') || lowerContent.includes('love engine')) return 'fnf-love';

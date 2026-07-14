@@ -1,15 +1,15 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   Search, WifiOff, AlertCircle, RotateCcw,
-  Compass, ChevronDown,
+  Compass, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { DiscoverModCard } from '../components/DiscoverModCard';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { useTranslation } from '../hooks/useTranslation';
 
 const CATEGORIES = [
-  'All', 'Characters', 'Executables', 'Weeks', 'Songs', 'Stages', 'Skins', 'UI', 'Tools', 'Misc',
+  'All', 'Mod', 'Character', 'Song', 'Audio', 'Misc', 'WIP',
 ];
 
 const SORT_OPTIONS = [
@@ -22,6 +22,8 @@ const SORT_OPTIONS = [
 
 const DISCOVER_CACHE_KEY = 'funklobby_discover_cache';
 const REQUEST_TIMEOUT = 30000;
+const PAGE_SIZE = 48;
+const MAX_VISIBLE_PAGES = 7;
 
 export function HomePage() {
   const { t } = useTranslation();
@@ -31,11 +33,11 @@ export function HomePage() {
   const [results, setResults] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
+  const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [pageCache, setPageCache] = useState<Record<number, any[]>>({});
   const searchTimer = useRef<any>(null);
   const mountedRef = useRef(false);
   const currentFetch = useRef(0);
@@ -43,62 +45,29 @@ export function HomePage() {
   useEffect(() => {
     if (mountedRef.current) return;
     mountedRef.current = true;
-
-    const cached = loadFromCache();
-    if (cached && cached.mods.length > 0) {
-      setResults(cached.mods);
-      setTotal(cached.total || 0);
-      setHasMore(cached.hasMore || false);
-      setPage(cached.page || 1);
-      setLoading(false);
-    }
-
     doFetch(1, false);
   }, []);
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
+    setPageCache({});
     searchTimer.current = setTimeout(() => {
       doFetch(1, false);
     }, 350);
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
   }, [query, category, sortBy]);
 
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el || !hasMore || loading) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loading) {
-          doFetch(page + 1, true);
-        }
-      },
-      { rootMargin: '400px' },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasMore, loading, page, results.length]);
-
-  function loadFromCache(): { mods: any[]; total: number; hasMore: boolean; page: number } | null {
-    try {
-      const raw = localStorage.getItem(DISCOVER_CACHE_KEY);
-      if (raw) {
-        const cached = JSON.parse(raw);
-        if (cached?.mods?.length > 0) return cached;
+  const doFetch = useCallback(async (p: number, fromCache = false) => {
+    if (!fromCache) {
+      const cachedPage = pageCache[p];
+      if (cachedPage) {
+        setResults(cachedPage);
+        setPage(p);
+        return;
       }
-    } catch {}
-    return null;
-  }
+    }
 
-  function saveToCache(data: { mods: any[]; total: number; hasMore: boolean; page: number }) {
-    try {
-      localStorage.setItem(DISCOVER_CACHE_KEY, JSON.stringify(data));
-    } catch {}
-  }
-
-  const doFetch = async (p: number, append: boolean) => {
     const fetchId = ++currentFetch.current;
-
     setLoading(true);
     setError(null);
     setOffline(false);
@@ -109,7 +78,7 @@ export function HomePage() {
         category: category === 'All' ? undefined : category,
         sortBy,
         page: p,
-        limit: 30,
+        limit: PAGE_SIZE,
       });
 
       const timeoutPromise = new Promise<never>((_, reject) =>
@@ -117,23 +86,21 @@ export function HomePage() {
       );
 
       const result = await Promise.race([fetchPromise, timeoutPromise]);
-
       if (fetchId !== currentFetch.current) return;
 
       const mods = result.mods || [];
-      setResults(prev => append ? [...prev, ...mods] : mods);
+      setResults(mods);
       setPage(p);
       setTotal(result.total || 0);
-      setHasMore(p < (result.totalPages || 1));
+      setTotalPages(result.totalPages || Math.ceil((result.total || 0) / PAGE_SIZE) || 1);
       setLoading(false);
 
+      setPageCache(prev => ({ ...prev, [p]: mods }));
+
       if (p === 1 && !query.trim()) {
-        saveToCache({
-          mods,
-          total: result.total || 0,
-          hasMore: 1 < (result.totalPages || 1),
-          page: 1,
-        });
+        try {
+          localStorage.setItem(DISCOVER_CACHE_KEY, JSON.stringify({ mods, total: result.total || 0, page: 1 }));
+        } catch {}
       }
     } catch (err: any) {
       if (fetchId !== currentFetch.current) return;
@@ -145,11 +112,34 @@ export function HomePage() {
         setError(err.message || 'Unable to load GameBanana mods.');
       }
     }
-  };
+  }, [query, category, sortBy, pageCache]);
 
-  const handleRetry = () => {
-    doFetch(1, false);
-  };
+  const goToPage = useCallback((p: number) => {
+    if (p < 1 || p > totalPages || loading) return;
+    doFetch(p, false);
+  }, [totalPages, loading, doFetch]);
+
+  const handleRetry = () => doFetch(1, false);
+
+  const visiblePages = useMemo(() => {
+    const pages: (number | 'ellipsis')[] = [];
+    const total = totalPages;
+    const current = page;
+    if (total <= MAX_VISIBLE_PAGES) {
+      for (let i = 1; i <= total; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      let start = Math.max(2, current - 2);
+      let end = Math.min(total - 1, current + 2);
+      if (current <= 3) { start = 2; end = Math.min(5, total - 1); }
+      if (current >= total - 2) { start = Math.max(total - 4, 2); end = total - 1; }
+      if (start > 2) pages.push('ellipsis');
+      for (let i = start; i <= end; i++) pages.push(i);
+      if (end < total - 1) pages.push('ellipsis');
+      pages.push(total);
+    }
+    return pages;
+  }, [page, totalPages]);
 
   const hasResults = results.length > 0;
   const showLoadingSpinner = !hasResults && loading;
@@ -271,16 +261,40 @@ export function HomePage() {
               <div className="flex justify-center py-6"><LoadingSpinner /></div>
             )}
 
-            {!loading && hasMore && (
-              <div ref={sentinelRef} className="flex justify-center py-4">
-                <ChevronDown className="w-4 h-4 text-surface-500 animate-bounce" />
+            {totalPages > 1 && !loading && (
+              <div className="flex items-center justify-center gap-1.5 mt-6 pb-4">
+                <button
+                  className="pagination-btn"
+                  disabled={page <= 1}
+                  onClick={() => goToPage(page - 1)}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                {visiblePages.map((p, i) =>
+                  p === 'ellipsis' ? (
+                    <span key={`e-${i}`} className="px-1 text-surface-500 text-sm">...</span>
+                  ) : (
+                    <button
+                      key={p}
+                      className={`pagination-btn min-w-[32px] ${
+                        p === page
+                          ? 'bg-primary-500/20 text-primary-300 border-primary-500/30'
+                          : 'text-surface-400 border-surface-700/30 hover:border-surface-600/50'
+                      }`}
+                      onClick={() => goToPage(p)}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+                <button
+                  className="pagination-btn"
+                  disabled={page >= totalPages}
+                  onClick={() => goToPage(page + 1)}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
-            )}
-
-            {!hasMore && results.length > 0 && (
-              <p className="text-center text-surface-500 text-xs py-4">
-                Showing all {results.length} mods
-              </p>
             )}
           </div>
         )}

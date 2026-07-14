@@ -200,4 +200,9 @@ body.light {
   @apply bg-surface-300/50 hover:bg-surface-400/50;
 }
 
+.pagination-btn {
+  @apply flex items-center justify-center w-8 h-8 rounded-lg text-sm border transition-all duration-200 hover:bg-surface-800/50 disabled:opacity-30 disabled:cursor-not-allowed;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
 

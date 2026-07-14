@@ -24,11 +24,11 @@ export function EnginesPage() {
     no_releases: { label: t('engines.noReleases'), color: 'text-red-400 bg-red-500/10' },
   };
   const {
-    engines, catalog, loading,
+    engines, catalog, loading, installProgress,
     fetchEngines, fetchCatalog, installEngine, uninstallEngine,
     launchEngine, detectEngines, checkUpdates, updateEngine,
     repairEngine, verifyEngine, createShortcut, openFolder,
-    importExternalEngine,
+    importExternalEngine, initProgressListener,
   } = useEngineStore();
 
   const [tab, setTab] = useState<Tab>('all');
@@ -39,6 +39,7 @@ export function EnginesPage() {
   useEffect(() => {
     fetchEngines();
     fetchCatalog();
+    return initProgressListener();
   }, []);
 
   const getEngineStatus = useCallback((engineType: string) => {
@@ -235,10 +236,11 @@ export function EnginesPage() {
                     className="card p-5 flex flex-col gap-2 h-full hover:-translate-y-1 hover:shadow-xl hover:shadow-black/30"
                   >
                     <EngineBanner
+                      engineId={entry.id}
                       engineName={entry.name}
-                      height={90}
-                      className="-mx-5"
-                    />
+height={150}
+                        className="-mx-5"
+                      />
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
                         <h3 className="text-white font-semibold text-sm truncate">{entry.name}</h3>
@@ -375,12 +377,27 @@ export function EnginesPage() {
                       </div>
                     )}
 
+                    {installProgress[entry.id] && (
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[10px] text-surface-400">
+                          <span>{installProgress[entry.id].status === 'downloading' ? t('engines.downloading') : t('engines.installing')}</span>
+                          <span>{installProgress[entry.id].percent}%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-surface-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary-500 rounded-full transition-all duration-300"
+                            style={{ width: `${installProgress[entry.id].percent}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex flex-wrap gap-2 mt-auto pt-2">
                       {!installed || installed.status === 'not_installed' || installed.status === 'download_failed' ? (
                         <button
-                          className={`text-xs flex-1 ${!entry.supported ? 'btn-disabled' : 'btn-primary'}`}
+                          className="text-xs flex-1 btn-primary"
                           onClick={() => handleInstall(entry.id)}
-                          disabled={!entry.supported || actionStates[entry.id] === 'installing'}
+                          disabled={actionStates[entry.id] === 'installing'}
                         >
                           <Download className="w-3 h-3 inline mr-1" />
                           {actionStates[entry.id] === 'installing' ? t('engines.installing') : installed?.status === 'download_failed' ? t('downloads.retry') : t('engines.install')}
@@ -481,13 +498,14 @@ export function EnginesPage() {
                         className="card p-5 flex flex-col gap-2 h-full hover:-translate-y-1 hover:shadow-xl hover:shadow-black/30 border-violet-500/20"
                       >
                         <EngineBanner
+                          engineId={engine.type}
                           engineName={engine.name}
-                          height={90}
-                          className="-mx-5"
-                        />
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1 min-w-0">
-                            <h3 className="text-white font-semibold text-sm truncate">{engine.name}</h3>
+height={150}
+                        className="-mx-5"
+                      />
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-white font-semibold text-sm truncate">{engine.name}</h3>
                             <p className="text-surface-400 text-xs mt-1 line-clamp-3 leading-relaxed">{engine.description}</p>
                           </div>
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-violet-400 bg-violet-500/10 rounded-full flex-shrink-0 ml-2">

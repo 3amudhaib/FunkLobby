@@ -28,6 +28,7 @@ interface EngineState {
   enginesLoaded: boolean;
   catalogLoaded: boolean;
   error: string | null;
+  installProgress: Record<string, { percent: number; status: string }>;
 
   fetchEngines: () => Promise<void>;
   fetchCatalog: () => Promise<void>;
@@ -45,6 +46,7 @@ interface EngineState {
   verifyEngine: (engineId: string) => Promise<any>;
   createShortcut: (engineId: string) => Promise<void>;
   importExternalEngine: () => Promise<any>;
+  initProgressListener: () => () => void;
 }
 
 export const useEngineStore = create<EngineState>((set, get) => ({
@@ -55,6 +57,7 @@ export const useEngineStore = create<EngineState>((set, get) => ({
   enginesLoaded: false,
   catalogLoaded: false,
   error: null,
+  installProgress: {},
 
   fetchEngines: async () => {
     try {
@@ -159,5 +162,26 @@ export const useEngineStore = create<EngineState>((set, get) => ({
       await get().fetchEngines();
     }
     return result;
+  },
+
+  initProgressListener: () => {
+    const cb = (data: { engineType: string; percent: number; status: string }) => {
+      set(state => ({
+        installProgress: {
+          ...state.installProgress,
+          [data.engineType]: { percent: data.percent, status: data.status },
+        },
+      }));
+      if (data.percent >= 100 || data.status === 'installed' || data.status === 'error') {
+        setTimeout(() => {
+          set(state => {
+            const { [data.engineType]: _, ...rest } = state.installProgress;
+            return { installProgress: rest };
+          });
+        }, 3000);
+      }
+    };
+    window.electronAPI.onEngineInstallProgress(cb);
+    return () => window.electronAPI.removeEngineInstallProgressListener(cb);
   },
 }));

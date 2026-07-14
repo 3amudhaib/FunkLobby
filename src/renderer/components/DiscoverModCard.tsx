@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Download, Heart, ExternalLink, Clock, ThumbsUp, Loader2, FolderOpen } from 'lucide-react';
 import { useTranslation } from '../hooks/useTranslation';
 import { useModStore } from '../stores/modStore';
+import { getEngineBadge } from '../utils/engineBadges';
 
 interface DiscoverModCardProps {
   mod: {
@@ -81,11 +82,7 @@ export function DiscoverModCard({ mod, index = 0 }: DiscoverModCardProps) {
 
   const installed = mod.isInstalled || justInstalled;
 
-  const engineBadge = (() => {
-    const e = mod.engine?.toLowerCase() || '';
-    if (e === 'unknown' || !e) return null;
-    return e;
-  })();
+  const engineBadge = getEngineBadge(mod.engine);
 
   return (
     <motion.div
@@ -131,11 +128,9 @@ export function DiscoverModCard({ mod, index = 0 }: DiscoverModCardProps) {
         </div>
 
         <div className="flex items-center gap-1.5 flex-wrap">
-          {engineBadge && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary-500/10 text-primary-300 border border-primary-500/20">
-              {mod.engine}
-            </span>
-          )}
+          <span className={`text-[10px] px-1.5 py-0.5 rounded border ${engineBadge.bg} ${engineBadge.color} ${engineBadge.border}`}>
+            {engineBadge.label}
+          </span>
           {mod.category && mod.category !== 'Other' && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-700/50 text-surface-300 border border-surface-600/30">
               {mod.category}
