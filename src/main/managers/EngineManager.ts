@@ -56,7 +56,12 @@ const BINARY_ASSET_MAP: Record<string, { binaryHint: string; exeName: string }> 
 };
 
 function getEnginesRoot(): string {
-  return path.join(app.getPath('userData'), INSTALL_ROOT);
+  // In production, store engines next to the exe (outside asar) so the user
+  // can move the app folder without losing engines. In dev, use the project root.
+  const base = app.isPackaged
+    ? path.dirname(app.getPath('exe'))
+    : app.getAppPath();
+  return path.join(base, 'engines');
 }
 
 function getImageCacheDir(): string {
@@ -967,15 +972,28 @@ export class EngineManager {
       throw new Error(`Engine is not installed (status: ${engine.status})`);
     }
     if (!engine.installPath) throw new Error('Engine install path is missing');
-    if (!await asyncFs.exists(engine.installPath).catch(() => false)) throw new Error('Engine install path does not exist on disk');
+
+    // Resolve the actual install path — handle migration from a previous dev/userData path
+    let installPath = engine.installPath;
+    if (!await asyncFs.exists(installPath).catch(() => false)) {
+      // Try the old userData-based path as a fallback (for engines installed before v1.0.6)
+      const oldRoot = path.join(app.getPath('userData'), 'engine-manager');
+      const folderName = path.basename(installPath);
+      const oldPath = path.join(oldRoot, folderName);
+      if (await asyncFs.exists(oldPath).catch(() => false)) {
+        installPath = oldPath;
+      } else {
+        throw new Error('Engine install path does not exist on disk');
+      }
+    }
 
     let exe = engine.exePath || null;
     if (!exe || !await asyncFs.exists(exe).catch(() => false)) {
-      exe = await this.findEngineExe(engine.installPath);
+      exe = await this.findEngineExe(installPath);
     }
     if (!exe) throw new Error('Engine executable not found. Try repairing the engine.');
 
-    return this.launchExe(exe, engine.installPath);
+    return this.launchExe(exe, installPath);
   }
 
   static async launchMod(enginePath: string, modPath: string): Promise<void> {
