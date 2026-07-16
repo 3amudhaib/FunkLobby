@@ -172,11 +172,12 @@ export const useModStore = create<ModState>((set, get) => ({
   },
 
   installMod: async (modId, profileId) => {
-    await window.electronAPI.installMod(modId, profileId);
+    const result = await window.electronAPI.installMod(modId, profileId);
     await Promise.all([
       get().fetchInstalled(),
       get().fetchLibrary(),
     ]);
+    return result;
   },
 
   uninstallMod: async (installId) => {

@@ -1,14 +1,16 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Folder, Download, Bell, Zap, Palette, Check, Trash2, Globe } from 'lucide-react';
+import { Folder, Download, Bell, Zap, Palette, Check, Trash2, Globe, Compass } from 'lucide-react';
 import { useSettingsStore } from '../stores/settingsStore';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { THEME_PRESETS } from '../../shared/constants';
 import { useTranslation } from '../hooks/useTranslation';
+import { WelcomeDialog } from '../components/WelcomeDialog';
 
 export function SettingsPage() {
   const { t } = useTranslation();
   const { settings, fetchSettings, updateSettings, resetSettings, loading } = useSettingsStore();
+  const [showWelcomeReplay, setShowWelcomeReplay] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -254,24 +256,85 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="card p-5 border-red-500/20">
+          <WelcomeDialog open={showWelcomeReplay} onDismiss={() => setShowWelcomeReplay(false)} />
+
+          <section className="card p-5 border-amber-500/20">
             <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
-              <Trash2 className="w-4 h-4 text-red-400" />
-              {t('settings.dangerZone')}
+              <Trash2 className="w-4 h-4 text-amber-400" />
+              {t('settings.maintenance')}
             </h2>
-            <p className="text-xs text-surface-400 mb-3">{t('settings.dangerDesc')}</p>
-            <button
-              className="btn-danger text-sm"
-              onClick={async () => {
-                const result = await window.electronAPI.clearAllData();
-                if (result.success) {
-                  window.location.reload();
-                }
-              }}
-            >
-              <Trash2 className="w-3.5 h-3.5 inline mr-1.5" />
-              {t('settings.clearAllData')}
-            </button>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-white">{t('settings.clearCache')}</p>
+                  <p className="text-xs text-surface-400">{t('settings.clearCacheDesc')}</p>
+                </div>
+                <button
+                  className="btn-secondary text-xs whitespace-nowrap"
+                  onClick={async () => {
+                    await window.electronAPI.clearCacheOnly();
+                  }}
+                >
+                  {t('settings.clearCache')}
+                </button>
+              </div>
+
+              <hr className="border-surface-700/50" />
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-white">{t('settings.resetApp')}</p>
+                  <p className="text-xs text-surface-400">{t('settings.resetAppDesc')}</p>
+                </div>
+                <button
+                  className="btn-secondary text-xs text-amber-400 border-amber-500/30 whitespace-nowrap"
+                  onClick={async () => {
+                    const result = await window.electronAPI.resetAppKeepFiles();
+                    if (result?.success) {
+                      window.location.reload();
+                    }
+                  }}
+                >
+                  {t('settings.resetApp')}
+                </button>
+              </div>
+
+              <hr className="border-surface-700/50" />
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-white">{t('settings.showWelcome') || 'Show Welcome Screen'}</p>
+                  <p className="text-xs text-surface-400">{t('settings.showWelcomeDesc') || 'Re-open the welcome introduction dialog.'}</p>
+                </div>
+                <button
+                  className="btn-secondary text-xs whitespace-nowrap"
+                  onClick={() => setShowWelcomeReplay(true)}
+                >
+                  <Compass className="w-3 h-3 inline-block mr-1" />
+                  {t('settings.showWelcome') || 'Show Welcome'}
+                </button>
+              </div>
+
+              <hr className="border-surface-700/50" />
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-white">{t('settings.factoryReset')}</p>
+                  <p className="text-xs text-surface-400">{t('settings.factoryResetDesc')}</p>
+                </div>
+                <button
+                  className="btn-danger text-xs whitespace-nowrap"
+                  onClick={async () => {
+                    const result = await window.electronAPI.clearAllData();
+                    if (result?.success) {
+                      window.location.reload();
+                    }
+                  }}
+                >
+                  {t('settings.factoryReset')}
+                </button>
+              </div>
+            </div>
           </section>
         </div>
       </motion.div>

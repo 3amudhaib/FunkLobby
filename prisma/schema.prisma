@@ -15,6 +15,7 @@ model Mod {
   version      String
   description  String
   engine       String
+  detectedEngines String @default("[]")
   tags         String
   category     String
   homepage     String

@@ -4,6 +4,7 @@ import { app } from 'electron';
 import { getPrisma } from './PrismaManager';
 import { LogManager } from './LogManager';
 import { asyncFs } from '../asyncFs';
+import { EngineManager } from './EngineManager';
 
 export class RepairManager {
   static async autoRepair() {
@@ -12,6 +13,13 @@ export class RepairManager {
 
     await this.sweepCache();
 
+    // 1. Migrate old engines from next-to-exe location to userData
+    await EngineManager.migrateOldEngines();
+
+    // 2. Validate all installed engines against disk
+    await EngineManager.validateAllInstalledEngines();
+
+    // 3. Validate mod installations
     const installs = await prisma.install.findMany({ include: { mod: true } });
     for (const install of installs) {
       const modFolder = path.join(install.enginePath, 'mods', this.sanitizeFolderName(install.mod.title));
@@ -39,6 +47,7 @@ export class RepairManager {
       }
     }
 
+    // 4. Clean up orphan mod records
     const allMods = await prisma.mod.findMany({ include: { installs: true } });
     for (const mod of allMods) {
       if (mod.isInstalled && mod.installs.length === 0) {

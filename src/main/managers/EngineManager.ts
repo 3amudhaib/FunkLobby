@@ -56,12 +56,9 @@ const BINARY_ASSET_MAP: Record<string, { binaryHint: string; exeName: string }> 
 };
 
 function getEnginesRoot(): string {
-  // In production, store engines next to the exe (outside asar) so the user
-  // can move the app folder without losing engines. In dev, use the project root.
-  const base = app.isPackaged
-    ? path.dirname(app.getPath('exe'))
-    : app.getAppPath();
-  return path.join(base, 'engines');
+  // Store everything inside userData so it survives app updates and is
+  // writable regardless of install location (%APPDATA%/FunkLobby/engines).
+  return path.join(app.getPath('userData'), 'engines');
 }
 
 function getImageCacheDir(): string {
@@ -90,10 +87,85 @@ function sanitizeFolderName(name: string): string {
 }
 
 export class EngineManager {
+  /** Track child processes by engine ID so we can report running state and kill them. */
+  private static runningEngines = new Map<string, { proc: import('child_process').ChildProcess; exePath: string; startedAt: number }>();
+
+  /** Migrate engines from the old next-to-exe location to userData. */
+  static async migrateOldEngines(): Promise<void> {
+    const oldRoot = app.isPackaged
+      ? path.join(path.dirname(app.getPath('exe')), 'engines')
+      : path.join(app.getAppPath(), 'engines');
+    const newRoot = getEnginesRoot();
+    if (oldRoot === newRoot) return;
+    try {
+      if (await asyncFs.exists(oldRoot).catch(() => false)) {
+        const entries = await asyncFs.readdir(oldRoot) as string[];
+        await asyncFs.ensureDir(newRoot);
+        for (const entry of entries) {
+          const src = path.join(oldRoot, entry);
+          const dst = path.join(newRoot, entry);
+          try {
+            if (!await asyncFs.exists(dst).catch(() => false)) {
+              await asyncFs.rename(src, dst);
+            }
+          } catch {}
+        }
+        // Remove old root if empty
+        const remaining = await asyncFs.readdir(oldRoot) as string[];
+        if (remaining.length === 0) {
+          await asyncFs.rm(oldRoot, { recursive: true, force: true }).catch(() => {});
+        }
+      }
+    } catch {}
+  }
+
+  /** Mark an engine process as running. Called after successful spawn. */
+  private static trackRunningEngine(engineId: string, proc: import('child_process').ChildProcess, exePath: string): void {
+    this.runningEngines.set(engineId, { proc, exePath, startedAt: Date.now() });
+    this.sendEnginesRunningChanged();
+    proc.on('exit', () => {
+      this.runningEngines.delete(engineId);
+      this.sendEnginesRunningChanged();
+    });
+  }
+
+  /** Get set of engine IDs whose processes are currently alive. */
+  static getRunningEngineIds(): string[] {
+    return Array.from(this.runningEngines.keys());
+  }
+
+  /** Gracefully stop a running engine. */
+  static async stopEngine(engineId: string): Promise<void> {
+    const entry = this.runningEngines.get(engineId);
+    if (!entry) throw new Error(`Engine ${engineId} is not running`);
+    entry.proc.kill('SIGTERM');
+    // Wait up to 5 seconds for graceful exit
+    for (let i = 0; i < 50; i++) {
+      if (!this.runningEngines.has(engineId)) return;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    // Force kill
+    entry.proc.kill('SIGKILL');
+    this.runningEngines.delete(engineId);
+    this.sendEnginesRunningChanged();
+  }
+
+  private static sendEnginesRunningChanged(): void {
+    try {
+      const ids = Array.from(this.runningEngines.keys());
+      BrowserWindow.getAllWindows().forEach(win => {
+        win.webContents.send('engines:runningChanged', ids);
+      });
+    } catch {}
+  }
+
+  private static catalogRefreshInProgress = false;
 
   static async getCatalog(): Promise<EngineCatalogEntry[]> {
     const entries = ENGINE_CATALOG.map(e => ({ ...e }));
     const results: EngineCatalogEntry[] = [];
+    const pendingFetches: Array<{ entry: EngineCatalogEntry; owner: string; repo: string }> = [];
+
     for (const entry of entries) {
       if (!entry.repoOwner || !entry.repoName) {
         entry.installMethod = entry.downloadUrl ? 'direct_download' : 'manual';
@@ -102,48 +174,138 @@ export class EngineManager {
         results.push(entry);
         continue;
       }
-      // Validate the repository exists and is not archived
-      const validation = await this.getCachedValidation(entry.repoOwner, entry.repoName);
-      if (validation && !validation.valid) {
-        entry.supported = true;
-        entry.repoUrl = `https://github.com/${entry.repoOwner}/${entry.repoName}`;
-        results.push(entry);
-        continue;
-      }
-      if (validation && validation.archived) {
-        entry.supported = true;
-        entry.repoUrl = `https://github.com/${entry.repoOwner}/${entry.repoName}`;
-        results.push(entry);
-        continue;
-      }
-      // Use the validated (possibly redirected) repo URL
-      if (validation?.redirectUrl) {
-        entry.repoUrl = validation.redirectUrl;
-        const parts = validation.redirectUrl.replace('https://github.com/', '').split('/');
-        if (parts.length >= 2) {
-          entry.repoOwner = parts[0];
-          entry.repoName = parts[1];
-        }
-      } else {
-        entry.repoUrl = `https://github.com/${entry.repoOwner}/${entry.repoName}`;
-      }
+      entry.repoUrl = `https://github.com/${entry.repoOwner}/${entry.repoName}`;
       const bam = BINARY_ASSET_MAP[entry.id];
       if (bam) {
         entry.binaryAssetName = bam.binaryHint;
         entry.executableName = bam.exeName;
       }
-      const release = await this.getCachedRelease(entry.repoOwner, entry.repoName);
-      const method = classifyEngineInstallMethod(entry, release);
-      entry.installMethod = method;
-      // Mark as supported — all engines can be installed (auto-download or manual import)
-      if (method === 'binary' || method === 'direct_download') {
+      // Check if release cache exists for instant response
+      const cachedRelease = await this.getCachedReleaseIfAvailable(entry.repoOwner, entry.repoName);
+      if (cachedRelease !== undefined) {
+        const method = classifyEngineInstallMethod(entry, cachedRelease);
+        entry.installMethod = method;
         entry.supported = true;
       } else {
+        // No cached release — show "Checking..." and fetch in background
+        entry.installMethod = 'checking';
         entry.supported = true;
+        pendingFetches.push({ entry, owner: entry.repoOwner, repo: entry.repoName });
       }
       results.push(entry);
     }
+
+    // Kick off background release fetching for uncached entries
+    if (pendingFetches.length > 0 && !this.catalogRefreshInProgress) {
+      this.catalogRefreshInProgress = true;
+      this.refreshCatalogReleases(results, pendingFetches).finally(() => {
+        this.catalogRefreshInProgress = false;
+      });
+    }
+
     return results;
+  }
+
+  private static async getCachedReleaseIfAvailable(owner: string, repo: string): Promise<GitHubRelease | null | undefined> {
+    const cacheKey = `${owner}/${repo}`.toLowerCase().replace(/[^a-z0-9/]/g, '_');
+    const cacheDir = getReleaseCacheDir();
+    const cacheFile = path.join(cacheDir, `${cacheKey}.json`);
+    try {
+      const exists = await asyncFs.exists(cacheFile);
+      if (!exists) return undefined;
+      const raw = await asyncFs.readFile(cacheFile);
+      const entry = JSON.parse(raw as string) as { fetchedAt: number; data: GitHubRelease | null };
+      // Return stale cache data if available — graceful fallback
+      if (entry.data) return entry.data;
+      return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private static async refreshCatalogReleases(entries: EngineCatalogEntry[], pending: Array<{ entry: EngineCatalogEntry; owner: string; repo: string }>) {
+    const updated: EngineCatalogEntry[] = [];
+    const retryQueue: Array<{ entry: EngineCatalogEntry; owner: string; repo: string; attempt: number }> = [];
+    const MAX_RETRIES = 3;
+    const RETRY_BASE_DELAY = 2000;
+
+    for (const { entry, owner, repo } of pending) {
+      try {
+        const release = await this.getCachedRelease(owner, repo);
+        const method = classifyEngineInstallMethod(entry, release);
+        if (entry.installMethod !== method) {
+          entry.installMethod = method;
+          updated.push(entry);
+        }
+      } catch {
+        // Fetch failed — check if stale cache exists on disk
+        const staleRelease = await this.getCachedReleaseIfAvailable(owner, repo);
+        if (staleRelease !== undefined) {
+          const method = classifyEngineInstallMethod(entry, staleRelease);
+          if (entry.installMethod !== method) {
+            entry.installMethod = method;
+            updated.push(entry);
+          }
+        } else {
+          // No cache at all — keep 'checking', schedule retry later
+          if (entry.installMethod !== 'checking') {
+            entry.installMethod = 'checking';
+            updated.push(entry);
+          }
+          retryQueue.push({ entry, owner, repo, attempt: 1 });
+        }
+      }
+    }
+
+    // Retry failed fetches with exponential backoff
+    for (const rq of retryQueue) {
+      this.retryReleaseFetch(rq.entry, rq.owner, rq.repo, rq.attempt, MAX_RETRIES, RETRY_BASE_DELAY, entries);
+    }
+
+    if (updated.length > 0) {
+      this.sendCatalogUpdated(entries);
+    }
+  }
+
+  private static async retryReleaseFetch(
+    entry: EngineCatalogEntry, owner: string, repo: string,
+    attempt: number, maxRetries: number, baseDelay: number, allEntries: EngineCatalogEntry[]
+  ) {
+    const delay = baseDelay * Math.pow(2, attempt - 1);
+    await new Promise(r => setTimeout(r, delay));
+    try {
+      const release = await this.getCachedRelease(owner, repo);
+      const method = classifyEngineInstallMethod(entry, release);
+      if (entry.installMethod !== method) {
+        entry.installMethod = method;
+        this.sendCatalogUpdated(allEntries);
+      }
+    } catch {
+      if (attempt < maxRetries) {
+        this.retryReleaseFetch(entry, owner, repo, attempt + 1, maxRetries, baseDelay, allEntries);
+      } else {
+        // Final fallback — check stale cache one more time
+        const staleRelease = await this.getCachedReleaseIfAvailable(owner, repo);
+        if (staleRelease !== undefined) {
+          const method = classifyEngineInstallMethod(entry, staleRelease);
+          if (entry.installMethod !== method) {
+            entry.installMethod = method;
+            this.sendCatalogUpdated(allEntries);
+          }
+        }
+        // If still no cache, leave as 'checking' — next app restart will retry
+      }
+    }
+  }
+
+  private static sendCatalogUpdated(entries: EngineCatalogEntry[]) {
+    try {
+      const { BrowserWindow } = require('electron');
+      const wins = BrowserWindow.getAllWindows();
+      for (const win of wins) {
+        win.webContents.send('catalog:update', entries);
+      }
+    } catch {}
   }
 
   static async getAllInstalled(): Promise<any[]> {
@@ -327,7 +489,7 @@ export class EngineManager {
         entry.executableName = bam.exeName;
       }
       const method = classifyEngineInstallMethod(entry, release);
-      if (method === 'source_only' || method === 'no_releases' || method === 'unknown_repo') {
+      if (method === 'source_only' || method === 'unavailable' || method === 'unknown_repo') {
         const imported = await this.importExternalEngine();
         if (!imported) throw new Error('Import cancelled.');
         return;
@@ -987,13 +1149,24 @@ export class EngineManager {
       }
     }
 
+    // Prevent launching if already running
+    if (this.runningEngines.has(engine.id)) {
+      throw new Error('Engine is already running');
+    }
+
     let exe = engine.exePath || null;
     if (!exe || !await asyncFs.exists(exe).catch(() => false)) {
       exe = await this.findEngineExe(installPath);
     }
     if (!exe) throw new Error('Engine executable not found. Try repairing the engine.');
 
-    return this.launchExe(exe, installPath);
+    const result = await this.launchExe(exe, installPath);
+    // Track if launch was successful (process started)
+    if (result.healthOk) {
+      this.trackRunningEngine(engine.id, result.childProc!, exe);
+    }
+    // Return health info but strip childProc
+    return { healthOk: result.healthOk, exitCode: result.exitCode };
   }
 
   static async launchMod(enginePath: string, modPath: string): Promise<void> {
@@ -1027,7 +1200,7 @@ export class EngineManager {
     return null;
   }
 
-  static async launchExe(exePath: string, cwd: string): Promise<{ healthOk: boolean; exitCode?: number; error?: string }> {
+  static async launchExe(exePath: string, cwd: string): Promise<{ healthOk: boolean; exitCode?: number; error?: string; childProc?: import('child_process').ChildProcess }> {
     LogManager.info('Launching executable', { exePath, cwd });
     return new Promise((resolve) => {
       const isLoveFile = path.extname(exePath).toLowerCase() === '.love';
@@ -1049,7 +1222,7 @@ export class EngineManager {
       proc.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
 
       const timer = setTimeout(() => {
-        if (proc.exitCode === null) { resolve({ healthOk: true }); }
+        if (proc.exitCode === null) { resolve({ healthOk: true, childProc: proc }); }
       }, 3000);
 
       proc.on('error', (err) => {
@@ -1064,7 +1237,7 @@ export class EngineManager {
           const diag = stderr ? ` (stderr: ${stderr.trim().slice(0, 200)})` : '';
           LogManager.warn('Executable exited with error', { exePath, cwd, exitCode: code, stderr: stderr.slice(0, 500) });
         }
-        resolve(healthOk ? { healthOk: true } : { healthOk: false, exitCode: code, error: stderr ? stderr.trim().slice(0, 200) : undefined });
+        resolve(healthOk ? { healthOk: true, childProc: proc } : { healthOk: false, exitCode: code, error: stderr ? stderr.trim().slice(0, 200) : undefined });
       });
     });
   }
@@ -1092,8 +1265,8 @@ export class EngineManager {
       process.env.LOCALAPPDATA || '',
       process.env.PROGRAMFILES || '',
       process.env['PROGRAMFILES(X86)'] || '',
-      path.join(process.env.USERPROFILE || '', 'Downloads'),
-      path.join(process.env.USERPROFILE || '', 'Desktop'),
+      app.getPath('downloads'),
+      app.getPath('desktop'),
       process.env.APPDATA || '',
       getEnginesRoot(),
     ];
@@ -1263,6 +1436,87 @@ export class EngineManager {
   }
 
   /**
+   * Validate ALL installed engines against disk and repair DB records.
+   * - If engine folder or exe is missing, mark as not_installed.
+   * - If engine folder exists but DB says not_installed, keep it.
+   * - Remove orphan engine records (engine installed in DB but no disk trace).
+   * Returns { repaired: number, removed: number }.
+   */
+  static async validateAllInstalledEngines(): Promise<{ repaired: number; removed: number }> {
+    const prisma = getPrisma();
+    const allEngines = await prisma.engine.findMany();
+    let repaired = 0;
+    let removed = 0;
+
+    for (const engine of allEngines) {
+      // Skip engines that are clearly not installed
+      if (engine.status === 'not_installed' || engine.status === 'download_failed') continue;
+
+      const installPath = engine.installPath;
+      if (!installPath) {
+        // DB says installed but no path — reset
+        await prisma.engine.update({
+          where: { id: engine.id },
+          data: { status: 'not_installed', exePath: null, version: null, installedAt: null, lastUpdatedAt: null, error: 'Install path was missing' },
+        });
+        removed++;
+        continue;
+      }
+
+      const pathExists = await asyncFs.exists(installPath).catch(() => false);
+      if (!pathExists) {
+        // Try fallback to userData path
+        const userDataPath = path.join(app.getPath('userData'), 'engines', path.basename(installPath));
+        if (await asyncFs.exists(userDataPath).catch(() => false)) {
+          // Migrate the path in DB
+          await prisma.engine.update({
+            where: { id: engine.id },
+            data: { installPath: userDataPath, status: 'installed' },
+          });
+          repaired++;
+          continue;
+        }
+        // Path truly gone — mark as not_installed
+        await prisma.engine.update({
+          where: { id: engine.id },
+          data: { status: 'not_installed', exePath: null, version: null, installedAt: null, lastUpdatedAt: null, error: 'Engine folder was deleted' },
+        });
+        removed++;
+        continue;
+      }
+
+      // Path exists — verify exe
+      let exe = engine.exePath || null;
+      if (!exe || !await asyncFs.exists(exe).catch(() => false)) {
+        exe = await this.findEngineExe(installPath);
+      }
+      if (!exe) {
+        // Exe missing but folder exists — mark as corrupted
+        await prisma.engine.update({
+          where: { id: engine.id },
+          data: { status: 'corrupted', error: 'Executable not found', exePath: null },
+        });
+        removed++;
+        continue;
+      }
+
+      // Everything looks good — ensure status is correct
+      if (engine.status !== 'installed' && engine.status !== 'update_available') {
+        await prisma.engine.update({
+          where: { id: engine.id },
+          data: { status: 'installed', exePath: exe, error: null },
+        });
+        repaired++;
+      }
+    }
+
+    if (repaired > 0 || removed > 0) {
+      LogManager.info('Engine validation complete', { repaired, removed });
+    }
+    return { repaired, removed };
+  }
+
+  /**
    * Remove all engine records that are not in the current catalog.
    * Also clear cached images for removed engines.
    */
@@ -1305,11 +1559,7 @@ export class EngineManager {
   }
 
   static getAssetsEnginesPath(): string {
-    try {
-      return resolvePackagedAssetPath(['assets', 'engines']);
-    } catch {
-      return path.join(__dirname, '..', '..', '..', 'assets', 'engines');
-    }
+    return resolvePackagedAssetPath(['assets', 'engines']);
   }
 
   /**

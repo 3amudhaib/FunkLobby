@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Download, ExternalLink, FolderOpen, Trash2, Loader2, Eye, ThumbsUp } from 'lucide-react';
+import { Download, ExternalLink, FolderOpen, Trash2, Loader2, Eye, ThumbsUp, MessageCircle, Play } from 'lucide-react';
 import { ModCover } from './ModCover';
 import { useModStore } from '../stores/modStore';
+import { useEngineStore } from '../stores/engineStore';
 import { useTranslation } from '../hooks/useTranslation';
 import { getEngineBadge } from '../utils/engineBadges';
 
@@ -22,6 +23,7 @@ interface SearchResultCardProps {
     likeCount: number;
     updatedAt: string;
     isInstalled: boolean;
+    detectedEngines?: string;
   };
   index: number;
   focused?: boolean;
@@ -31,22 +33,63 @@ export function SearchResultCard({ mod, index, focused }: SearchResultCardProps)
   const { t } = useTranslation();
   const [installing, setInstalling] = useState(false);
   const [justInstalled, setJustInstalled] = useState(false);
+  const [gbStats, setGbStats] = useState<{ likeCount: number; viewCount: number; commentCount: number } | null>(null);
+  const [installProgress, setInstallProgress] = useState<{ step: string; percent: number } | null>(null);
+  const progressCbRef = useRef<((data: any) => void) | null>(null);
   const { installMod, uninstallMod } = useModStore();
+  const { runningEngines, launchMod, engines } = useEngineStore();
+
+  const parsedEngines: Array<{ engineId: string; confidence: number }> = (() => {
+    try {
+      if (mod.detectedEngines) {
+        const parsed = JSON.parse(mod.detectedEngines);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return [{ engineId: mod.engine, confidence: 1.0 }];
+  })();
+
+  const isEngineRunning = parsedEngines.some((e: { engineId: string }) => runningEngines.has(e.engineId));
+
+  useEffect(() => {
+    if (mod.gameBananaId > 0) {
+      window.electronAPI.getModStats(mod.gameBananaId).then((stats: any) => {
+        if (stats) setGbStats(stats);
+      }).catch(() => {});
+    }
+  }, [mod.gameBananaId]);
 
   const handleInstall = async () => {
     if (installing) return;
     setInstalling(true);
+    setInstallProgress({ step: 'Starting...', percent: 0 });
+
+    const onProgress = (data: any) => setInstallProgress(data);
+    progressCbRef.current = onProgress;
+    window.electronAPI.onModInstallProgress(onProgress);
+
     try {
       const profiles = await window.electronAPI.getProfiles();
       const defaultProfile = profiles.find((p: any) => p.isDefault) || profiles[0];
       if (!defaultProfile) throw new Error('No profile found');
       await installMod(mod.id, defaultProfile.id);
       setJustInstalled(true);
-      setTimeout(() => setJustInstalled(false), 2000);
+      setInstallProgress(null);
     } catch (err: any) {
-      alert(err?.message || 'Installation failed');
+      setInstallProgress(null);
     }
+    window.electronAPI.removeModInstallProgressListener(onProgress);
+    progressCbRef.current = null;
     setInstalling(false);
+  };
+
+  const handleLaunch = async () => {
+    const installedTypes = new Set(engines.filter(en => en.status === 'installed' || en.status === 'update_available').map(en => en.type));
+    const bestEngine = parsedEngines.find(e => installedTypes.has(e.engineId));
+    const primaryEngine = bestEngine?.engineId || parsedEngines[0]?.engineId || mod.engine;
+    try {
+      await launchMod(mod.id, primaryEngine);
+    } catch {}
   };
 
   const handleUninstall = async () => {
@@ -84,8 +127,9 @@ export function SearchResultCard({ mod, index, focused }: SearchResultCardProps)
   };
 
   const installed = mod.isInstalled || justInstalled;
-
   const fallbackColor = `hsl(${(mod.title.length * 37) % 360}, 50%, 30%)`;
+
+  const stats = gbStats || { likeCount: mod.likeCount, viewCount: mod.viewCount, commentCount: 0 };
 
   return (
     <motion.div
@@ -114,10 +158,14 @@ export function SearchResultCard({ mod, index, focused }: SearchResultCardProps)
           </div>
 
           <div className="flex items-center gap-1 flex-shrink-0">
-            {(() => {
-              const badge = getEngineBadge(mod.engine);
-              return <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.bg} ${badge.color} ${badge.border}`}>{badge.label}</span>;
-            })()}
+            {parsedEngines.map((e: { engineId: string; confidence: number }, i: number) => {
+              const badge = getEngineBadge(e.engineId);
+              return i === 0 ? (
+                <span key={e.engineId} className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.bg} ${badge.color} ${badge.border}`}>{badge.label}</span>
+              ) : (
+                <span key={e.engineId} className="text-[10px] px-1.5 py-0.5 rounded border border-surface-600/30 text-surface-400 bg-surface-700/30">{badge.label}</span>
+              );
+            })}
             {installed && <span className="badge-primary text-[10px] bg-emerald-500/20 text-emerald-400 border-emerald-500/30">{t('searchResult.installed')}</span>}
           </div>
         </div>
@@ -126,15 +174,18 @@ export function SearchResultCard({ mod, index, focused }: SearchResultCardProps)
           <p className="text-xs text-surface-500 mt-1.5 line-clamp-2">{mod.description}</p>
         )}
 
-        <div className="flex items-center gap-3 mt-2 text-[11px] text-surface-500">
+        <div className="flex items-center gap-3 mt-2 text-[11px] text-surface-500 flex-wrap">
           {mod.downloadCount > 0 && (
             <span className="flex items-center gap-1"><Download className="w-3 h-3" />{formatCount(mod.downloadCount)}</span>
           )}
-          {mod.viewCount > 0 && (
-            <span className="flex items-center gap-1"><Eye className="w-3 h-3" />{formatCount(mod.viewCount)}</span>
+          {stats.viewCount > 0 && (
+            <span className="flex items-center gap-1"><Eye className="w-3 h-3" />{formatCount(stats.viewCount)}</span>
           )}
-          {mod.likeCount > 0 && (
-            <span className="flex items-center gap-1"><ThumbsUp className="w-3 h-3" />{formatCount(mod.likeCount)}</span>
+          {stats.likeCount > 0 && (
+            <span className="flex items-center gap-1"><ThumbsUp className="w-3 h-3" />{formatCount(stats.likeCount)}</span>
+          )}
+          {stats.commentCount > 0 && (
+            <span className="flex items-center gap-1"><MessageCircle className="w-3 h-3" />{formatCount(stats.commentCount)}</span>
           )}
           <span className="ml-auto">{formatDate(mod.updatedAt)}</span>
         </div>
@@ -144,13 +195,17 @@ export function SearchResultCard({ mod, index, focused }: SearchResultCardProps)
             <button
               className="btn-primary text-[11px] h-7 px-3"
               onClick={handleInstall}
-              disabled={installing}
+              disabled={installing || isEngineRunning}
+              title={isEngineRunning ? 'Stop the engine first before installing' : undefined}
             >
               {installing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-              {installing ? t('searchResult.installing') : t('searchResult.install')}
+              {installing && installProgress ? installProgress.step : installing ? t('searchResult.installing') : t('searchResult.install')}
             </button>
           ) : (
             <>
+              <button className="btn-primary text-[11px] h-7 px-3" onClick={handleLaunch}>
+                <Play className="w-3 h-3" /> Launch
+              </button>
               <button className="btn-secondary text-[11px] h-7 px-3" onClick={handleOpenFolder}>
                 <FolderOpen className="w-3 h-3" /> {t('searchResult.open')}
               </button>
@@ -167,6 +222,14 @@ export function SearchResultCard({ mod, index, focused }: SearchResultCardProps)
             <ExternalLink className="w-3 h-3" />
           </button>
         </div>
+        {installProgress && (
+          <div className="mt-2 h-1 bg-surface-700 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary-500 transition-all duration-300 rounded-full"
+              style={{ width: `${installProgress.percent}%` }}
+            />
+          </div>
+        )}
       </div>
     </motion.div>
   );

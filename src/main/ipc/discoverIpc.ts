@@ -41,4 +41,12 @@ export function registerDiscoverIpc() {
   ipcMain.handle('discover:downloadUrl', async (_event, gameBananaId: number) => {
     return await GameBananaSearch.getModDownloadUrl(gameBananaId);
   });
+
+  ipcMain.handle('discover:getStats', async (_event, gameBananaId: number) => {
+    return await GameBananaSearch.getModStats(gameBananaId);
+  });
+
+  ipcMain.handle('discover:getComments', async (_event, gameBananaId: number, page: number) => {
+    return await GameBananaSearch.getModComments(gameBananaId, page);
+  });
 }

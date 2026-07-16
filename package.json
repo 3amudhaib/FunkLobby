@@ -1,10 +1,10 @@
 {
   "name": "fnf-lobby",
-  "version": "1.0.0",
-  "description": "FunkLobby - Mod Manager and Launcher for Friday Night Funkin'",
+  "version": "1.0.7",
+  "description": "FunkLobby",
   "main": "dist/main/main.js",
   "author": {
-    "name": "FunkLobby",
+    "name": "lorenthesnake",
     "email": "mohamozyeen@gmail.com",
     "url": "https://github.com/3amudhaib"
   },
@@ -103,7 +103,7 @@
   "build": {
     "appId": "com.funklobby.app",
     "productName": "FunkLobby",
-    "copyright": "Copyright (c) 2026 FunkLobby",
+    "copyright": "Copyright (c) 2026 lorenthesnake",
     "directories": {
       "output": "release"
     },
@@ -124,13 +124,14 @@
         "to": "prisma/"
       }
     ],
+
     "win": {
       "icon": "assets/icon.ico",
       "target": [
         "nsis",
         "portable"
       ],
-      "publisherName": "FunkLobby",
+      "publisherName": "lorenthesnake",
       "legalTrademarks": "FunkLobby",
       "signAndEditExecutable": false
     },
@@ -139,13 +140,14 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "shortcutName": "FunkLobby",
-      "artifactName": "${productName} Setup.${ext}",
+      "artifactName": "${productName}.Setup.${ext}",
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
-      "installerHeaderIcon": "assets/icon.ico"
+      "installerHeaderIcon": "assets/icon.ico",
+      "menuCategory": true
     },
     "portable": {
-      "artifactName": "${productName} Portable.${ext}",
+      "artifactName": "${productName}.Portable.${ext}",
       "requestExecutionLevel": "user"
     },
     "publish": {

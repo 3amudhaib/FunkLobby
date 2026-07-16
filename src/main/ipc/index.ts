@@ -7,6 +7,7 @@ import { registerFileIpc } from './fileIpc';
 import { registerAppIpc } from './appIpc';
 import { registerUpdateIpc } from './updateIpc';
 import { registerDiscoverIpc } from './discoverIpc';
+import { registerEasterEggIpc } from './easterEggIpc';
 
 export function registerAllIpc() {
   registerModIpc();
@@ -18,4 +19,5 @@ export function registerAllIpc() {
   registerAppIpc();
   registerUpdateIpc();
   registerDiscoverIpc();
+  registerEasterEggIpc();
 }

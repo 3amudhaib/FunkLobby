@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Home, Package, Download, Library, Users,
-  Heart, Settings, Info, Monitor, ArrowUp,
+  Heart, Settings, Info, Monitor, ArrowUp, Stethoscope,
 } from 'lucide-react';
 import { SidebarHeader } from './SidebarHeader';
 import { useTranslation } from '../hooks/useTranslation';
@@ -20,6 +20,7 @@ const navItems = [
   { to: '/favorites', icon: Heart, label: t('nav.favorites') },
   { to: '/updates', icon: ArrowUp, label: t('nav.updates') },
   { to: '/settings', icon: Settings, label: t('nav.settings') },
+  { to: '/diagnostics', icon: Stethoscope, label: 'Diagnostics' },
   { to: '/about', icon: Info, label: t('nav.about') },
 ];
   return (

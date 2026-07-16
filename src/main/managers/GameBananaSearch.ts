@@ -169,7 +169,17 @@ function gameBananaTimestampToIso(...timestamps: unknown[]): string {
   return new Date().toISOString();
 }
 
+export interface EngineMatch {
+  engineId: string;
+  confidence: number;
+}
+
 export function detectEngineFromMod(record: any): string {
+  const matches = detectEnginesFromMod(record);
+  return matches.length > 0 ? matches[0].engineId : 'standalone';
+}
+
+export function detectEnginesFromMod(record: any): EngineMatch[] {
   const haystack = [
     record._sName || record.name || '',
     record._sDescription || '',
@@ -177,14 +187,40 @@ export function detectEngineFromMod(record: any): string {
     (record._aTags || record.tags || []).map((t: any) => typeof t === 'string' ? t : t._sName || t.name || '').join(' '),
   ].join(' ').toLowerCase();
 
+  const scores = new Map<string, number>();
+
   for (const entry of ENGINE_KEYWORDS) {
     for (const kw of entry.keywords) {
       if (haystack.includes(kw)) {
-        return entry.engineId;
+        const current = scores.get(entry.engineId) || 0;
+        const keywordLen = kw.length;
+        // Longer keywords = more specific = higher confidence
+        const confidence = Math.min(1.0, (current || 0) + 0.3 + (keywordLen / 50));
+        scores.set(entry.engineId, confidence);
       }
     }
   }
-  return 'standalone';
+
+  // Boost psych if "flixel" or "haxe engine" is mentioned (common in FNF mods)
+  if (haystack.includes('flixel') && !scores.has('psych')) {
+    scores.set('psych', 0.5);
+  }
+
+  const CONFIGURABLE_THRESHOLD = 0.3;
+  const results: EngineMatch[] = [];
+  for (const [engineId, confidence] of scores) {
+    if (confidence >= CONFIGURABLE_THRESHOLD) {
+      results.push({ engineId, confidence });
+    }
+  }
+
+  results.sort((a, b) => b.confidence - a.confidence);
+
+  if (results.length === 0) {
+    return [{ engineId: 'standalone', confidence: 0.1 }];
+  }
+
+  return results;
 }
 
 interface SearchParams {
@@ -220,6 +256,8 @@ const searchCache = new Map<string, { data: any; timestamp: number }>();
 const CACHE_TTL = 120_000;
 const detailsCache = new Map<number, { data: any; timestamp: number }>();
 const DETAILS_CACHE_TTL = 300_000;
+const statsCache = new Map<number, { data: { likeCount: number; viewCount: number; commentCount: number }; timestamp: number }>();
+const STATS_CACHE_TTL = 120_000;
 
 function searchCacheKey(p: SearchParams): string {
   return `${p.query || ''}|${p.category || ''}|${p.engine || ''}|${p.sortBy || 'trending'}|${p.page || 1}|${p.limit || 48}`;
@@ -476,6 +514,10 @@ export class GameBananaSearch {
     return detectEngineFromMod(record);
   }
 
+  static detectEnginesFromMod(record: any): EngineMatch[] {
+    return detectEnginesFromMod(record);
+  }
+
   static async getRichModDetails(gameBananaId: number): Promise<any | null> {
     try {
       const v11Promise = rateLimitedGet(`${GB_API_V11}/Mod/${gameBananaId}`, {
@@ -547,9 +589,76 @@ export class GameBananaSearch {
     }
   }
 
+  static async getModStats(gameBananaId: number): Promise<{ likeCount: number; viewCount: number; commentCount: number } | null> {
+    const cached = statsCache.get(gameBananaId);
+    if (cached && Date.now() - cached.timestamp < STATS_CACHE_TTL) {
+      return cached.data;
+    }
+    try {
+      const res = await rateLimitedGet(`${GB_API_V11}/Mod/${gameBananaId}`, {
+        params: {
+          _csvProperties: '_nLikeCount,_nViewCount,_nCommentCount',
+        },
+        headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' },
+        timeout: 8000,
+      });
+      if (res.data && !res.data._sErrorCode) {
+        const data = {
+          likeCount: res.data._nLikeCount || 0,
+          viewCount: res.data._nViewCount || 0,
+          commentCount: res.data._nCommentCount || 0,
+        };
+        statsCache.set(gameBananaId, { data, timestamp: Date.now() });
+        return data;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  static async getModComments(gameBananaId: number, page: number = 1, perPage: number = 20): Promise<{
+    comments: any[];
+    total: number;
+    page: number;
+    totalPages: number;
+  }> {
+    try {
+      const res = await rateLimitedGet(`${GB_API_V11}/Mod/${gameBananaId}/Comments`, {
+        params: {
+          _nPage: page,
+          _nPerpage: perPage,
+        },
+        headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' },
+        timeout: 10000,
+      });
+      const records: any[] = res.data._aRecords || [];
+      const total = res.data._aMetadata?._nRecordCount || records.length;
+      return {
+        comments: records.map((c: any) => ({
+          id: c._idRow,
+          username: c._aAuthor?._sName || 'Anonymous',
+          avatarUrl: c._aAuthor?._aAvatar?._sBaseUrl
+            ? `${c._aAuthor._aAvatar._sBaseUrl}/${c._aAuthor._aAvatar._sFile}`
+            : '',
+          date: gameBananaTimestampToIso(c._tsDatePosted),
+          body: c._sText || '',
+          isSticky: c._bIsSticky || false,
+          isOP: c._bIsOP || false,
+        })),
+        total,
+        page,
+        totalPages: Math.ceil(total / perPage),
+      };
+    } catch {
+      return { comments: [], total: 0, page, totalPages: 0 };
+    }
+  }
+
   static clearCache() {
     searchCache.clear();
     detailsCache.clear();
+    statsCache.clear();
   }
 
   private static async getInstalledStatus(gameBananaIds: number[]): Promise<Set<number>> {

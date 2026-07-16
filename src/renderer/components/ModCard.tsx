@@ -124,8 +124,23 @@ export function ModCard({ mod, index = 0 }: ModCardProps) {
 
             <div className="flex items-center gap-1.5 mt-2">
               {(() => {
-                const badge = getEngineBadge(mod.engine);
-                return <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.bg} ${badge.color} ${badge.border}`}>{badge.label}</span>;
+                const engines: Array<{ engineId: string; confidence: number }> = (() => {
+                  try {
+                    if (mod.detectedEngines) {
+                      const p = JSON.parse(mod.detectedEngines);
+                      if (Array.isArray(p) && p.length > 0) return p;
+                    }
+                  } catch {}
+                  return [{ engineId: mod.engine, confidence: 1.0 }];
+                })();
+                return engines.map((e, i) => {
+                  const badge = getEngineBadge(e.engineId);
+                  return i === 0 ? (
+                    <span key={e.engineId} className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.bg} ${badge.color} ${badge.border}`}>{badge.label}</span>
+                  ) : (
+                    <span key={e.engineId} className="text-[10px] px-1.5 py-0.5 rounded border border-surface-600/30 text-surface-400 bg-surface-700/30">{badge.label}</span>
+                  );
+                });
               })()}
               {mod.category && mod.category !== 'Other' && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-700/50 text-surface-300 border border-surface-600/30">

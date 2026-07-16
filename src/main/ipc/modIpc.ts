@@ -1,4 +1,4 @@
-import { ipcMain, dialog, app } from 'electron';
+import { ipcMain, dialog, app, BrowserWindow } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
@@ -15,6 +15,14 @@ import { asyncFs } from '../asyncFs';
 import { IPC_CHANNELS, STANDALONE_ENGINE_ID } from '../../shared/constants';
 
 const GAMEBANANA_CORE_API = 'https://api.gamebanana.com/Core';
+
+function sendInstallProgress(step: string, percent: number): void {
+  try {
+    BrowserWindow.getAllWindows().forEach(win => {
+      win.webContents.send('mod:installProgress', { step, percent });
+    });
+  } catch {}
+}
 
 async function resolveGameBananaDownloadUrl(mod: {
   sourceUrl?: string;
@@ -263,7 +271,30 @@ export function registerModIpc() {
 
   ipcMain.handle(IPC_CHANNELS.INSTALL_MOD, async (_event, modId: string, profileId: string, engineSelection?: string) => {
     const prisma = getPrisma();
+
+    // If mod is already installed with a valid folder on disk, skip reinstallation
+    const existingInstall = await prisma.install.findFirst({
+      where: { modId },
+      include: { mod: true },
+    });
+    if (existingInstall?.mod) {
+      const modFolder = InstallerManager.getModFolderPath(
+        existingInstall.enginePath,
+        existingInstall.mod.title,
+        existingInstall.mod.engine
+      );
+      if (await asyncFs.exists(modFolder).catch(() => false)) {
+        // Already installed — refresh state and return without errors
+        try {
+          await prisma.mod.update({ where: { id: modId }, data: { isInstalled: true, updatedAt: new Date().toISOString() } });
+        } catch {}
+        return { installId: existingInstall.id, skipped: true };
+      }
+    }
+
     let mod = await prisma.mod.findUnique({ where: { id: modId } });
+
+    sendInstallProgress('Fetching mod info...', 5);
 
     let resolvedDownloadUrl: string | null = null;
 
@@ -283,7 +314,8 @@ export function registerModIpc() {
       const thumbnailUrl = detail['Preview().sSubFeedImageUrl()'] || '';
       const profileUrl = detail['Url().sProfileUrl()'] || `https://gamebanana.com/mods/${gbId}`;
       const downloadCount = detail.downloads || 0;
-      const autoEngine = engineSelection || GameBananaSearch.detectEngineFromMod(detail) || 'psych';
+      const detectedEngines = GameBananaSearch.detectEnginesFromMod(detail);
+      const autoEngine = engineSelection || detectedEngines[0]?.engineId || 'psych';
 
       // Use download URL directly from the detail, or construct a fallback
       if (firstFile?._sDownloadUrl) {
@@ -298,6 +330,7 @@ export function registerModIpc() {
           version: '1.0.0',
           description: detail.text || '',
           engine: autoEngine,
+          detectedEngines: JSON.stringify(detectedEngines),
           category: 'Other',
           thumbnailUrl,
           bannerUrl: '',
@@ -327,7 +360,7 @@ export function registerModIpc() {
     if (!download) {
       try {
         const settings = await SettingsManager.getAll();
-        const downloadFolder = settings.downloadFolder || path.join(process.env.USERPROFILE || '', 'Downloads', 'FunkLobby');
+        const downloadFolder = settings.downloadFolder || path.join(app.getPath('downloads'), 'FunkLobby');
         if (await asyncFs.exists(downloadFolder).catch(() => false)) {
           const files = await asyncFs.readdir(downloadFolder) as string[];
           const candidates = files.filter(f => {
@@ -373,7 +406,7 @@ export function registerModIpc() {
     }
 
     if (!download) {
-      // Use the download URL we already resolved, or try the fallback methods
+      sendInstallProgress('Downloading...', 20);
       const downloadUrl = resolvedDownloadUrl ||
         (await resolveGameBananaDownloadUrl(mod)) ||
         getDirectDownloadUrl(mod) ||
@@ -396,57 +429,54 @@ export function registerModIpc() {
     const profile = await prisma.profile.findUnique({ where: { id: profileId } });
     if (!profile) throw new Error('Profile not found');
 
-    let enginePath: string;
     const targetEngine = engineSelection || mod.engine;
 
+    sendInstallProgress('Detecting Engine...', 30);
+
     if (targetEngine === STANDALONE_ENGINE_ID) {
-      enginePath = path.join(app.getPath('userData'), 'standalone-mods');
-    } else {
-      let engine = await prisma.engine.findFirst({ where: { type: targetEngine } });
-
-      if (!engine) {
-        const allEngines = await prisma.engine.findMany();
-        if (allEngines.length === 0) {
-          await EngineManager.detectEngines();
-          engine = await prisma.engine.findFirst({ where: { type: targetEngine } });
-        } else {
-          engine = allEngines.find((e: any) => e.type === targetEngine) || null;
-        }
-      }
-
-      if (!engine || !engine.installPath) {
-        const assetsEngineRoot = path.join(EngineManager.getAssetsEnginesPath(), targetEngine);
-        if (await asyncFs.exists(assetsEngineRoot).catch(() => false)) {
-          const exe = await EngineManager.findEngineExe(assetsEngineRoot);
-          if (exe) {
-            enginePath = path.dirname(exe);
-          } else {
-            const subDirs = (await asyncFs.readdir(assetsEngineRoot, { withFileTypes: true }) as fs.Dirent[])
-              .filter(e => e.isDirectory());
-            if (subDirs.length > 0) {
-              const subExe = await EngineManager.findEngineExe(path.join(assetsEngineRoot, subDirs[0].name));
-              enginePath = subExe ? path.dirname(subExe) : assetsEngineRoot;
-            } else {
-              enginePath = assetsEngineRoot;
-            }
-          }
-        } else {
-          // Engine not found — fall back to standalone install to avoid blocking the user.
-          LogManager.warn('Engine not found for install, falling back to standalone', { modId, targetEngine });
-          enginePath = path.join(app.getPath('userData'), 'standalone-mods');
-          // Update mod record to mark as standalone target so future installs default to standalone
-          try {
-            await prisma.mod.update({ where: { id: modId }, data: { engine: STANDALONE_ENGINE_ID } });
-          } catch (e) {
-            LogManager.warn('Failed to update mod engine to standalone', { modId, error: String(e) });
-          }
-        }
-      } else {
-        enginePath = engine.installPath;
-      }
+      const standalonePath = path.join(app.getPath('userData'), 'standalone-mods');
+      sendInstallProgress('Installing Mod...', 70);
+      const result = await InstallerManager.installMod(modId, download.filePath, standalonePath, profileId);
+      sendInstallProgress('Ready.', 100);
+      return result;
     }
 
-    return await InstallerManager.installMod(modId, download.filePath, enginePath, profileId);
+    // For engine-based mods, require the engine to be installed
+    let engine = await prisma.engine.findFirst({ where: { type: targetEngine } });
+    if (!engine) {
+      // Try auto-detecting engines from disk
+      await EngineManager.detectEngines().catch(() => {});
+      engine = await prisma.engine.findFirst({ where: { type: targetEngine } });
+    }
+
+    const catalog = await EngineManager.getCatalog();
+    const catalogEntry = catalog.find(e => e.id === targetEngine);
+    const engineName = catalogEntry?.name || targetEngine;
+
+    // Auto-install missing engine
+    if (!engine || !engine.installPath) {
+      LogManager.info(`Auto-installing required engine: ${engineName} (${targetEngine})`);
+      sendInstallProgress('Installing Engine...', 40);
+      await EngineManager.installEngine(targetEngine);
+      engine = await prisma.engine.findFirst({ where: { type: targetEngine } });
+      if (!engine || !engine.installPath) {
+        throw new Error(`Failed to install required engine "${engineName}". Please try installing it manually from the Engines page.`);
+      }
+      sendInstallProgress('Engine installed', 60);
+    }
+
+    const enginePath = engine.installPath;
+    sendInstallProgress('Installing Mod...', 80);
+    const result = await InstallerManager.installMod(modId, download.filePath, enginePath, profileId);
+
+    sendInstallProgress('Finalizing...', 90);
+    await prisma.install.update({
+      where: { id: result.installId },
+      data: { enginePath: enginePath },
+    });
+
+    sendInstallProgress('Ready.', 100);
+    return result;
   });
 
   ipcMain.handle(IPC_CHANNELS.UNINSTALL_MOD, async (_event, id: string) => {

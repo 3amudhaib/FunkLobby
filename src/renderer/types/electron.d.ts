@@ -97,6 +97,28 @@ export interface ElectronAPI {
 
   getCacheSize: () => Promise<{ api: number; thumbnails: number; total: number }>;
   clearCache: (type?: 'api' | 'thumbnails' | 'all') => Promise<{ success: boolean }>;
+  clearCacheOnly: () => Promise<{ success: boolean }>;
+  resetAppKeepFiles: () => Promise<{ success: boolean }>;
+  getRunningEngines: () => Promise<string[]>;
+  stopEngine: (engineId: string) => Promise<any>;
+  validateAllEngines: () => Promise<any>;
+  onEnginesRunningChanged: (callback: (ids: string[]) => void) => void;
+  removeEnginesRunningChangedListener: (callback: (ids: string[]) => void) => void;
+
+  // Mod install progress events
+  onModInstallProgress: (callback: (data: { step: string; percent: number }) => void) => void;
+  removeModInstallProgressListener: (callback: (data: any) => void) => void;
+
+  // Catalog update events
+  onCatalogUpdate: (callback: (catalog: any[]) => void) => void;
+  removeCatalogUpdateListener: (callback: (catalog: any[]) => void) => void;
+
+  // Cache operations
+  getCachedThumbnail: (url: string) => Promise<string>;
+
+  // GameBanana stats & comments
+  getModStats: (gameBananaId: number) => Promise<{ likeCount: number; viewCount: number; commentCount: number } | null>;
+  getModComments: (gameBananaId: number, page?: number) => Promise<{ comments: any[]; total: number; page: number; totalPages: number }>;
 
   // Discover operations
   discoverGetSection: (section: string) => Promise<any[]>;
@@ -113,6 +135,17 @@ export interface ElectronAPI {
   setAutoUpdateApp: (enabled: boolean) => Promise<void>;
   getUpdateChannel: () => Promise<string>;
   getAutoUpdateApp: () => Promise<boolean>;
+
+  // Diagnostics
+  runDiagnostics: () => Promise<Array<{ check: string; status: 'ok' | 'warn' | 'fail'; message: string }>>;
+  repairInstallation: () => Promise<string[]>;
+
+  // Easter egg
+  triggerEasterEgg: () => Promise<void>;
+  onEasterEggOverlay: (callback: (data: { imageDataUrl: string }) => void) => void;
+  removeEasterEggOverlayListener: (callback: (data: any) => void) => void;
+  onEasterEggCleanup: (callback: () => void) => void;
+  removeEasterEggCleanupListener: (callback: () => void) => void;
 }
 
 declare global {

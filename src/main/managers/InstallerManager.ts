@@ -172,6 +172,13 @@ export class InstallerManager {
       if (detectedEngine && detectedEngine !== 'unknown') {
         modUpdate.engine = detectedEngine;
       }
+      // Also detect multiple engines with confidence scores
+      try {
+        const multiEngine = await InstallerManager.detectMultipleEnginesFromFolder(finalTargetPath);
+        if (multiEngine.length > 0) {
+          modUpdate.detectedEngines = JSON.stringify(multiEngine);
+        }
+      } catch {}
     } catch (err) {
       LogManager.warn('Failed to read installed mod metadata', { modId, error: String(err) });
     }
@@ -235,6 +242,65 @@ export class InstallerManager {
     return null;
   }
 
+  private static readonly ENGINE_SCORE_MAP: Record<string, Array<{ keywords: string[]; primary?: boolean }>> = {
+    psych: [
+      { keywords: ['psych engine', 'psychengine', 'psych'], primary: true },
+      { keywords: ['psychengine'] },
+      { keywords: ['_polymod_'] },
+    ],
+    codename: [
+      { keywords: ['codename engine', 'codename', 'codenameengine'], primary: true },
+    ],
+    'v-slice': [
+      { keywords: ['v-slice', 'vslice', 'v slice', 'p-slice', 'pslice'], primary: true },
+    ],
+    'fps-plus': [
+      { keywords: ['fps plus', 'fpsplus', 'fps+'], primary: true },
+    ],
+    'micd-up': [
+      { keywords: ["mic'd up", 'micdup', 'micd up', "mic'd up engine"], primary: true },
+    ],
+    yoshicrafter: [
+      { keywords: ['yoshicrafter', 'yoshi engine', 'yoshicrafterengine', 'yoshie'], primary: true },
+    ],
+    dragon: [
+      { keywords: ['dragon engine', 'dragonengine'], primary: true },
+    ],
+    shadow: [
+      { keywords: ['shadow engine', 'shadowengine'], primary: true },
+    ],
+    shattered: [
+      { keywords: ['shattered engine', 'shatteredengine'], primary: true },
+    ],
+    slushi: [
+      { keywords: ['slushi engine', 'slushiengine'], primary: true },
+    ],
+    troll: [
+      { keywords: ['troll engine', 'trollengine'], primary: true },
+    ],
+    universe: [
+      { keywords: ['universe engine', 'universeengine', 'solar engine', 'solarenengine'], primary: true },
+    ],
+    cdev: [
+      { keywords: ['cdev engine', 'cdev', 'cdevengine'], primary: true },
+    ],
+    forever: [
+      { keywords: ['forever engine', 'forever', 'foreverengine'], primary: true },
+    ],
+    'funkin-plus-plus': [
+      { keywords: ['funkin++', 'funkinplusplus', 'plus engine', 'plusengine'], primary: true },
+    ],
+    'js-engine': [
+      { keywords: ['js engine', 'jsengine'], primary: true },
+    ],
+    'fnf-love': [
+      { keywords: ['fnf love', 'fnf love engine', 'fnflove', 'love engine'], primary: true },
+    ],
+    vanilla: [
+      { keywords: ['vanilla', 'base game', 'basegame'], primary: true },
+    ],
+  };
+
   static detectEngineFromMetadata(engineStr: string): string {
     const known = ENGINE_CATALOG.map(e => e.id);
     const lower = engineStr.toLowerCase().replace(/[^a-z0-9+\-_. ]/g, '');
@@ -260,69 +326,154 @@ export class InstallerManager {
     return engineMap[lower] || (known.includes(lower) ? lower : 'unknown');
   }
 
-  static async detectEngineFromFolder(folderPath: string): Promise<string> {
+  static async detectMultipleEnginesFromFolder(folderPath: string): Promise<Array<{ engineId: string; confidence: number }>> {
+    const scores = new Map<string, number>();
+    const CONFIDENCE_THRESHOLD = 0.3;
+
     try {
       const entries = await asyncFs.readdir(folderPath) as string[];
-      const lower = entries.map(e => e.toLowerCase());
+      const lowerEntries = entries.map(e => e.toLowerCase());
 
-      // Check pack.json / mod.json first
-      for (const metaFile of ['pack.json', 'mod.json']) {
-        const idx = lower.indexOf(metaFile);
+      // 1. Check metadata files: pack.json, mod.json, engine.json, manifest.json
+      for (const metaFile of ['pack.json', 'mod.json', 'engine.json', 'manifest.json']) {
+        const idx = lowerEntries.indexOf(metaFile);
         if (idx !== -1) {
           try {
             const content = (await asyncFs.readFile(path.join(folderPath, entries[idx]))) as string;
             const parsed = JSON.parse(content);
-            const engineVal = parsed.engine || parsed.type || '';
+            const engineVal = parsed.engine || parsed.type || parsed.target || parsed.engineId || '';
             if (engineVal) {
               const detected = InstallerManager.detectEngineFromMetadata(engineVal);
-              if (detected !== 'unknown') return detected;
+              const normalized = engineVal.toLowerCase().replace(/[^a-z0-9+\-_. ]/g, '');
+              if (detected !== 'unknown') {
+                scores.set(detected, Math.max(scores.get(detected) || 0, 1.0));
+              }
+              // Also check if the normalized string matches any engine
+              for (const [engineId, mapEntry] of Object.entries(InstallerManager.ENGINE_SCORE_MAP)) {
+                for (const rule of mapEntry) {
+                  if (rule.primary && rule.keywords.some(kw => normalized.includes(kw))) {
+                    scores.set(engineId, Math.max(scores.get(engineId) || 0, 1.0));
+                  }
+                }
+              }
+            }
+            // Also scan entire JSON text for engine keywords
+            const jsonText = JSON.stringify(parsed).toLowerCase();
+            for (const [engineId, mapEntry] of Object.entries(InstallerManager.ENGINE_SCORE_MAP)) {
+              for (const rule of mapEntry) {
+                if (rule.keywords.some(kw => jsonText.includes(kw))) {
+                  scores.set(engineId, Math.max(scores.get(engineId) || 0, 0.7));
+                }
+              }
             }
           } catch {}
         }
       }
 
-      // Check project.xml
-      const projIdx = lower.indexOf('project.xml');
+      // 2. Check project.xml
+      const projIdx = lowerEntries.indexOf('project.xml');
       if (projIdx !== -1) {
         try {
           const content = (await asyncFs.readFile(path.join(folderPath, entries[projIdx]))) as string;
-          const engineId = InstallerManager.detectEngineFromProjectXml(content);
-          if (engineId !== 'unknown') return engineId;
+          const lower = content.toLowerCase();
+          InstallerManager.scoreFromText(lower, scores, 0.9);
         } catch {}
       }
 
-      // Check .hxproj files
-      const hxprojFiles = entries.filter(e => e.endsWith('.hxproj') || e.endsWith('.hxp'));
-      for (const hxf of hxprojFiles) {
+      // 3. Check .hxp / .hxproj files
+      const hxpFiles = entries.filter(e => e.endsWith('.hxp') || e.endsWith('.hxproj') || e.endsWith('.hxc'));
+      for (const hxf of hxpFiles) {
         try {
           const content = (await asyncFs.readFile(path.join(folderPath, hxf))) as string;
-          const lowerContent = content.toLowerCase();
-          const engineId = InstallerManager.detectEngineFromHxproj(lowerContent);
-          if (engineId !== 'unknown') return engineId;
+          InstallerManager.scoreFromText(content.toLowerCase(), scores, 0.8);
         } catch {}
       }
 
-      // Check for _polymod_ folder
-      if (entries.some(e => e.startsWith('_polymod_'))) {
-        return 'psych';
+      // 4. Check README files
+      const readmeFiles = entries.filter(e => /^readme/i.test(e));
+      for (const rf of readmeFiles) {
+        try {
+          const content = (await asyncFs.readFile(path.join(folderPath, rf))) as string;
+          InstallerManager.scoreFromText(content.toLowerCase(), scores, 0.5);
+        } catch {}
       }
 
-      // Check executable files that match known engine names
+      // 5. Check for _polymod_ folder (psych engine trait)
+      if (lowerEntries.some(e => e.startsWith('_polymod_'))) {
+        scores.set('psych', Math.max(scores.get('psych') || 0, 0.8));
+      }
+
+      // 6. Check Lua files for engine references
+      const luaFiles = entries.filter(e => e.endsWith('.lua'));
+      for (const lf of luaFiles) {
+        try {
+          const content = (await asyncFs.readFile(path.join(folderPath, lf))) as string;
+          InstallerManager.scoreFromText(content.toLowerCase(), scores, 0.4);
+        } catch {}
+      }
+
+      // 7. Check HScript files (.hx, .hscript)
+      const hsFiles = entries.filter(e => e.endsWith('.hx') || e.endsWith('.hscript'));
+      for (const hf of hsFiles) {
+        try {
+          const content = (await asyncFs.readFile(path.join(folderPath, hf))) as string;
+          InstallerManager.scoreFromText(content.toLowerCase(), scores, 0.4);
+        } catch {}
+      }
+
+      // 8. Check executable files that match known engine names
       for (const entry of entries) {
         const el = entry.toLowerCase();
         for (const catalog of ENGINE_CATALOG) {
           for (const detectFile of catalog.detectFiles) {
             if (el === detectFile.toLowerCase()) {
-              return catalog.id;
+              scores.set(catalog.id, Math.max(scores.get(catalog.id) || 0, 1.0));
             }
           }
         }
       }
 
-      return 'unknown';
+      // 9. Check source files for asset layout patterns
+      const dataFolders = lowerEntries.filter(e => e === 'assets' || e === 'data' || e === 'mods' || e === 'source' || e === 'src');
+      if (dataFolders.length > 0) {
+        // Standard FNF mod structure — boost psych/standalone slightly
+        if (!scores.has('standalone')) {
+          scores.set('standalone', Math.max(scores.get('standalone') || 0, 0.2));
+        }
+      }
+
+      // Build sorted results
+      const results: Array<{ engineId: string; confidence: number }> = [];
+      for (const [engineId, confidence] of scores) {
+        if (confidence >= CONFIDENCE_THRESHOLD) {
+          results.push({ engineId, confidence });
+        }
+      }
+      results.sort((a, b) => b.confidence - a.confidence);
+
+      if (results.length === 0) {
+        return [{ engineId: 'standalone', confidence: 0.1 }];
+      }
+      return results;
     } catch {
-      return 'unknown';
+      return [{ engineId: 'standalone', confidence: 0.1 }];
     }
+  }
+
+  private static scoreFromText(lowerText: string, scores: Map<string, number>, matchConfidence: number): void {
+    for (const [engineId, mapEntry] of Object.entries(InstallerManager.ENGINE_SCORE_MAP)) {
+      for (const rule of mapEntry) {
+        if (rule.keywords.some(kw => lowerText.includes(kw))) {
+          const score = matchConfidence * (rule.primary ? 1.0 : 0.7);
+          scores.set(engineId, Math.max(scores.get(engineId) || 0, score));
+        }
+      }
+    }
+  }
+
+  static async detectEngineFromFolder(folderPath: string): Promise<string> {
+    const results = await this.detectMultipleEnginesFromFolder(folderPath);
+    return results.length > 0 ? results[0].engineId : 'unknown';
   }
 
   private static detectEngineFromProjectXml(xmlContent: string): string {

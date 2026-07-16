@@ -84,7 +84,7 @@ export function DiscoverPage() {
     return pages;
   }, [page, totalPages]);
 
-  const showWelcome = !searchInitiated.current || (!query && results.length === 0 && !loading && !error);
+  const showInitialEmpty = !searchInitiated.current || (!query && results.length === 0 && !loading && !error);
 
   return (
     <div className="page-container pt-14">
@@ -131,15 +131,11 @@ export function DiscoverPage() {
           </div>
         )}
 
-        {showWelcome ? (
+        {showInitialEmpty ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500/20 to-surface-800 flex items-center justify-center mb-4">
-              <Compass className="w-8 h-8 text-primary-400" />
-            </div>
-            <h2 className="text-lg font-medium text-white mb-2">{t('discover.welcome')}</h2>
-            <p className="text-surface-400 text-sm max-w-md">
-              {t('discover.subtitle')}
-            </p>
+            <Compass className="w-12 h-12 text-surface-600 mb-3" />
+            <h2 className="text-lg font-medium text-white mb-1">{t('discover.welcome')}</h2>
+            <p className="text-surface-400 text-sm max-w-md">{t('discover.subtitle')}</p>
           </div>
         ) : loading && results.length === 0 ? (
           <LoadingSpinner className="mt-12" />

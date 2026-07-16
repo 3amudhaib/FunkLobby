@@ -99,7 +99,9 @@ export function registerEngineIpc() {
     if (!install) throw new Error('Mod not installed');
     if (!install.mod) throw new Error('Mod record not found');
 
-    if (install.mod.engine === STANDALONE_ENGINE_ID) {
+    const modEngineType = install.mod.engine;
+
+    if (modEngineType === STANDALONE_ENGINE_ID) {
       const modFolder = InstallerManager.getModFolderPath('', install.mod.title, STANDALONE_ENGINE_ID);
       if (!await asyncFs.exists(modFolder).catch(() => false)) {
         throw new Error(`Standalone mod folder not found at ${modFolder}. Reinstall the mod.`);
@@ -135,20 +137,23 @@ export function registerEngineIpc() {
     }
 
     const engine = engineId
-      ? await prisma.engine.findUnique({ where: { id: engineId } })
-      : await prisma.engine.findFirst({ where: { type: install.mod.engine } });
+      ? (await prisma.engine.findUnique({ where: { id: engineId } })) || (await prisma.engine.findFirst({ where: { type: engineId } }))
+      : await prisma.engine.findFirst({ where: { type: modEngineType } });
 
-    if (!engine) {
+    if (!engine || !engine.installPath) {
       const catalog = await EngineManager.getCatalog();
-      const known = catalog.find(e => e.id === install.mod.engine);
-      const engineName = known?.name || install.mod.engine;
-      throw new Error(
-        `Engine "${engineName}" is not installed. ` +
-        `Go to Engines to install ${engineName}, then try launching again.`
-      );
+      const known = catalog.find(e => e.id === modEngineType);
+      const engineName = known?.name || modEngineType;
+      // Throw a structured error that the renderer can parse
+      const err = new Error(`Required engine is not installed.`) as any;
+      err.engineType = modEngineType;
+      err.engineName = engineName;
+      throw err;
     }
 
-    const modPath = InstallerManager.getModFolderPath(engine.installPath || '', install.mod.title, install.mod.engine);
+    // Use enginePath from Install record if available, otherwise from engine
+    const basePath = install.enginePath || engine.installPath;
+    const modPath = InstallerManager.getModFolderPath(basePath, install.mod.title, modEngineType);
 
     if (!await asyncFs.exists(modPath).catch(() => false)) {
       const standalonePath = InstallerManager.getModFolderPath('', install.mod.title, STANDALONE_ENGINE_ID);
@@ -158,7 +163,7 @@ export function registerEngineIpc() {
       throw new Error(`Mod folder not found at ${modPath}. The mod may have been deleted.`);
     }
 
-    await EngineManager.launchMod(engine.installPath || '', modPath);
+    await EngineManager.launchMod(engine.installPath, modPath);
     return { success: true };
   });
 
@@ -173,6 +178,19 @@ export function registerEngineIpc() {
 
   ipcMain.handle(IPC_CHANNELS.GET_ENGINE_LOGS, async (_event, engineId: string) => {
     return EngineManager.getEngineLogs(engineId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GET_RUNNING_ENGINES, async () => {
+    return EngineManager.getRunningEngineIds();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.STOP_ENGINE, async (_event, engineId: string) => {
+    await EngineManager.stopEngine(engineId);
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.VALIDATE_ALL_ENGINES, async () => {
+    return EngineManager.validateAllInstalledEngines();
   });
 
   ipcMain.handle(IPC_CHANNELS.IMPORT_ENGINE, async () => {

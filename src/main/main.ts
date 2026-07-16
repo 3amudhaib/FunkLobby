@@ -10,6 +10,7 @@ import { RepairManager } from './managers/RepairManager';
 import { UpdateManager } from './managers/UpdateManager';
 import { ThemeIconManager } from './managers/ThemeIconManager';
 import { resolvePackagedAssetPath } from './utils/packagedPathResolver';
+import { asyncFs } from './asyncFs';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -21,7 +22,7 @@ function createWindow() {
     minHeight: 700,
     frame: true,
     show: false,
-    icon: resolvePackagedAssetPath(['assets', 'icon.png']),
+    icon: resolvePackagedAssetPath(['assets', 'icon.ico']),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -69,6 +70,12 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   LogManager.info('Application starting...');
+
+  // Set Windows App User Model ID so the taskbar icon matches our custom icon
+  app.setAppUserModelId('com.funklobby.app');
+
+  // Ensure all required directories exist on every startup
+  await ensureAppDirectories();
 
   await initDatabase();
   LogManager.markDbReady();
@@ -138,3 +145,46 @@ process.on('unhandledRejection', (reason) => {
   console.error('UNHANDLED REJECTION:', String(reason));
   LogManager.error('Unhandled rejection', { reason: String(reason) });
 });
+
+/**
+ * Create every required directory on startup so the app works
+ * for any Windows user without manual configuration.
+ */
+async function ensureAppDirectories(): Promise<void> {
+  const userData = app.getPath('userData');
+  const dirs = [
+    userData,
+    path.join(userData, 'engines'),
+    path.join(userData, 'mods'),
+    path.join(userData, 'standalone-mods'),
+    path.join(userData, 'downloads'),
+    path.join(userData, 'cache'),
+    path.join(userData, 'cache', 'api'),
+    path.join(userData, 'cache', 'thumbnails'),
+    path.join(userData, 'temp'),
+    path.join(userData, 'covers'),
+    path.join(userData, 'logs'),
+    path.join(userData, 'profiles'),
+    path.join(userData, 'repo-validation'),
+    path.join(userData, 'engine-releases'),
+    path.join(userData, 'engine-images'),
+    path.join(userData, 'update-cache'),
+    path.join(userData, 'update-backup'),
+  ];
+
+  let anyFailed = false;
+  for (const dir of dirs) {
+    try {
+      await asyncFs.ensureDir(dir);
+    } catch (err) {
+      LogManager.error('Failed to create directory', { dir, error: String(err) });
+      anyFailed = true;
+    }
+  }
+
+  if (anyFailed) {
+    LogManager.warn('Some directories could not be created. Some features may not work.');
+  } else {
+    LogManager.info('All app directories verified/created successfully');
+  }
+}

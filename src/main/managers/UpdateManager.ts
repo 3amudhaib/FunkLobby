@@ -50,11 +50,7 @@ function getBackupDir(): string {
 }
 
 function getAppRootDir(): string {
-  try {
-    return path.resolve(app.getAppPath(), '..');
-  } catch {
-    return path.resolve(__dirname, '..', '..', '..');
-  }
+  return path.resolve(app.getAppPath(), '..');
 }
 
 function getStatePath(): string {

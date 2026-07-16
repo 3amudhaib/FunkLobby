@@ -5,6 +5,7 @@ import { Sidebar } from './components/Sidebar';
 import { TitleBar } from './components/TitleBar';
 import { DownloadQueue } from './components/DownloadQueue';
 import { SmartScreenNotice } from './components/SmartScreenNotice';
+import { WelcomeDialog } from './components/WelcomeDialog';
 import { useDownloadEvents } from './hooks/useDownloadEvents';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useSettingsStore } from './stores/settingsStore';
@@ -24,6 +25,8 @@ import { AboutPage } from './pages/AboutPage';
 import { ModDetailPage } from './pages/ModDetailPage';
 import { GameBananaModDetailPage } from './pages/GameBananaModDetailPage';
 import { UpdatePage } from './pages/UpdatePage';
+import { DiagnosticsPage } from './pages/DiagnosticsPage';
+import { EasterEggOverlay } from './components/EasterEggOverlay';
 
 function AppContent() {
   const { settings, loading, fetchSettings, updateSettings } = useSettingsStore();
@@ -31,6 +34,7 @@ function AppContent() {
   const { fetchProfiles } = useProfileStore();
   const { isQueueVisible } = useDownloadStore();
   const [showSmartScreen, setShowSmartScreen] = useState(false);
+  const [showWelcomeScreen, setShowWelcomeScreen] = useState(false);
 
   useDownloadEvents();
   useKeyboardShortcuts();
@@ -48,11 +52,23 @@ function AppContent() {
     }
   }, [loading, settings.smartScreenDismissed]);
 
+  // Show welcome dialog only on first launch
+  useEffect(() => {
+    if (!loading && settings.welcomeShown !== 'true') {
+      setShowWelcomeScreen(true);
+    }
+  }, [loading, settings.welcomeShown]);
+
   const handleSmartScreenDismiss = async (dontShowAgain: boolean) => {
     if (dontShowAgain) {
       await updateSettings({ smartScreenDismissed: 'true' });
     }
     setShowSmartScreen(false);
+  };
+
+  const handleWelcomeDismiss = async () => {
+    await updateSettings({ welcomeShown: 'true' });
+    setShowWelcomeScreen(false);
   };
 
   useEffect(() => {
@@ -92,6 +108,7 @@ function AppContent() {
   return (
     <>
       <SmartScreenNotice open={showSmartScreen} onDismiss={handleSmartScreenDismiss} />
+      <WelcomeDialog open={showWelcomeScreen} onDismiss={handleWelcomeDismiss} />
       <div className="h-screen flex">
       <TitleBar />
       <Sidebar />
@@ -115,6 +132,7 @@ function AppContent() {
             <Route path="/favorites" element={<FavoritesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/about" element={<AboutPage />} />
+            <Route path="/diagnostics" element={<DiagnosticsPage />} />
             <Route path="/updates" element={<UpdatePage />} />
             <Route path="/mod/:id" element={<ModDetailPage />} />
             <Route path="/gb/:id" element={<GameBananaModDetailPage />} />
@@ -123,6 +141,7 @@ function AppContent() {
       </main>
       <DownloadQueue />
     </div>
+    <EasterEggOverlay />
     </>
   );
 }

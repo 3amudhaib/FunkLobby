@@ -1,10 +1,12 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Download, Heart, ExternalLink, Clock, ThumbsUp, Loader2, FolderOpen } from 'lucide-react';
+import { Download, Heart, ExternalLink, Clock, ThumbsUp, Loader2, FolderOpen, Eye, MessageCircle, Play } from 'lucide-react';
 import { useTranslation } from '../hooks/useTranslation';
 import { useModStore } from '../stores/modStore';
+import { useEngineStore } from '../stores/engineStore';
 import { getEngineBadge } from '../utils/engineBadges';
+import { LazyImage } from './LazyImage';
 
 interface DiscoverModCardProps {
   mod: {
@@ -22,18 +24,50 @@ interface DiscoverModCardProps {
     fileSize: number;
     updatedAt: string;
     isInstalled: boolean;
+    detectedEngines?: string;
   };
   index?: number;
+}
+
+interface InstallProgress {
+  step: string;
+  percent: number;
 }
 
 export function DiscoverModCard({ mod, index = 0 }: DiscoverModCardProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { installMod } = useModStore();
+  const { runningEngines, launchMod, engines } = useEngineStore();
   const [imgError, setImgError] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [justInstalled, setJustInstalled] = useState(false);
   const [isFav, setIsFav] = useState(false);
+  const [gbStats, setGbStats] = useState<{ likeCount: number; viewCount: number; commentCount: number } | null>(null);
+  const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
+  const progressCbRef = useRef<((data: InstallProgress) => void) | null>(null);
+
+  useEffect(() => {
+    if (mod.gameBananaId > 0) {
+      window.electronAPI.getModStats(mod.gameBananaId).then((stats: any) => {
+        if (stats) setGbStats(stats);
+      }).catch(() => {});
+    }
+  }, [mod.gameBananaId]);
+
+  // Parse detected engines list (fall back to primary engine if empty or invalid)
+  const parsedEngines: Array<{ engineId: string; confidence: number }> = (() => {
+    try {
+      if (mod.detectedEngines) {
+        const parsed = JSON.parse(mod.detectedEngines);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return [{ engineId: mod.engine, confidence: 1.0 }];
+  })();
+
+  // Check if any compatible engine is currently running
+  const isEngineRunning = parsedEngines.some((e: { engineId: string }) => runningEngines.has(e.engineId));
 
   const fallbackColor = `hsl(${(mod.title.length * 37) % 360}, 50%, 25%)`;
 
@@ -55,17 +89,40 @@ export function DiscoverModCard({ mod, index = 0 }: DiscoverModCardProps) {
     e.stopPropagation();
     if (installing) return;
     setInstalling(true);
+    setInstallProgress({ step: 'Starting...', percent: 0 });
+
+    // Listen for install progress
+    const onProgress = (data: InstallProgress) => {
+      setInstallProgress(data);
+    };
+    progressCbRef.current = onProgress;
+    window.electronAPI.onModInstallProgress(onProgress);
+
     try {
       const profiles = await window.electronAPI.getProfiles();
       const defaultProfile = profiles.find((p: any) => p.isDefault) || profiles[0];
       if (!defaultProfile) throw new Error('No profile found');
-      await installMod(mod.id, defaultProfile.id);
+      const result = await installMod(mod.id, defaultProfile.id);
       setJustInstalled(true);
+      setInstallProgress(null);
     } catch (err: any) {
-      alert(err?.message || 'Installation failed');
+      setInstallProgress(null);
     }
+    window.electronAPI.removeModInstallProgressListener(onProgress);
+    progressCbRef.current = null;
     setInstalling(false);
   }, [mod.id, installing, installMod]);
+
+  const handleLaunch = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Pick the best installed engine from detected engines
+    const installedTypes = new Set(engines.filter(en => en.status === 'installed' || en.status === 'update_available').map(en => en.type));
+    const bestEngine = parsedEngines.find(e => installedTypes.has(e.engineId));
+    const primaryEngine = bestEngine?.engineId || parsedEngines[0]?.engineId || mod.engine;
+    try {
+      await launchMod(mod.id, primaryEngine);
+    } catch {}
+  }, [mod.id, mod.engine, parsedEngines, launchMod, engines]);
 
   const handleFavorite = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -81,8 +138,9 @@ export function DiscoverModCard({ mod, index = 0 }: DiscoverModCardProps) {
   }, [mod.id, navigate]);
 
   const installed = mod.isInstalled || justInstalled;
-
   const engineBadge = getEngineBadge(mod.engine);
+
+  const stats = gbStats || { likeCount: mod.likeCount, viewCount: 0, commentCount: 0 };
 
   return (
     <motion.div
@@ -94,12 +152,20 @@ export function DiscoverModCard({ mod, index = 0 }: DiscoverModCardProps) {
     >
       <div className="relative aspect-[16/9] overflow-hidden bg-surface-800">
         {mod.thumbnailUrl && !imgError ? (
-          <img
+          <LazyImage
             src={mod.thumbnailUrl}
             alt={mod.title}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-            loading="lazy"
-            onError={() => setImgError(true)}
+            className="w-full h-full group-hover:scale-105 transition-transform duration-300"
+            fallback={
+              <div
+                className="w-full h-full flex items-center justify-center"
+                style={{ backgroundColor: fallbackColor }}
+              >
+                <span className="text-2xl font-bold text-white/40">
+                  {mod.title.charAt(0).toUpperCase()}
+                </span>
+              </div>
+            }
           />
         ) : (
           <div
@@ -117,6 +183,14 @@ export function DiscoverModCard({ mod, index = 0 }: DiscoverModCardProps) {
             Installed
           </span>
         )}
+        {installProgress && (
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-surface-700">
+            <div
+              className="h-full bg-primary-500 transition-all duration-300"
+              style={{ width: `${installProgress.percent}%` }}
+            />
+          </div>
+        )}
       </div>
 
       <div className="p-3 space-y-2">
@@ -128,9 +202,18 @@ export function DiscoverModCard({ mod, index = 0 }: DiscoverModCardProps) {
         </div>
 
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className={`text-[10px] px-1.5 py-0.5 rounded border ${engineBadge.bg} ${engineBadge.color} ${engineBadge.border}`}>
-            {engineBadge.label}
-          </span>
+          {parsedEngines.map((e: { engineId: string; confidence: number }, i: number) => {
+            const badge = getEngineBadge(e.engineId);
+            return i === 0 ? (
+              <span key={e.engineId} className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.bg} ${badge.color} ${badge.border}`}>
+                {badge.label}
+              </span>
+            ) : (
+              <span key={e.engineId} className="text-[10px] px-1.5 py-0.5 rounded border border-surface-600/30 text-surface-400 bg-surface-700/30">
+                {badge.label}
+              </span>
+            );
+          })}
           {mod.category && mod.category !== 'Other' && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-700/50 text-surface-300 border border-surface-600/30">
               {mod.category}
@@ -138,12 +221,18 @@ export function DiscoverModCard({ mod, index = 0 }: DiscoverModCardProps) {
           )}
         </div>
 
-        <div className="flex items-center gap-3 text-[11px] text-surface-400 pt-1">
+        <div className="flex items-center gap-3 text-[11px] text-surface-400 pt-1 flex-wrap">
           {mod.downloadCount > 0 && (
             <span className="flex items-center gap-1"><Download className="w-3 h-3" />{formatCount(mod.downloadCount)}</span>
           )}
-          {mod.likeCount > 0 && (
-            <span className="flex items-center gap-1"><ThumbsUp className="w-3 h-3" />{formatCount(mod.likeCount)}</span>
+          {stats.likeCount > 0 && (
+            <span className="flex items-center gap-1"><ThumbsUp className="w-3 h-3" />{formatCount(stats.likeCount)}</span>
+          )}
+          {stats.viewCount > 0 && (
+            <span className="flex items-center gap-1"><Eye className="w-3 h-3" />{formatCount(stats.viewCount)}</span>
+          )}
+          {stats.commentCount > 0 && (
+            <span className="flex items-center gap-1"><MessageCircle className="w-3 h-3" />{formatCount(stats.commentCount)}</span>
           )}
           <span className="flex items-center gap-1 ml-auto text-surface-500">
             <Clock className="w-3 h-3" />
@@ -156,21 +245,22 @@ export function DiscoverModCard({ mod, index = 0 }: DiscoverModCardProps) {
             <button
               className="btn-primary text-[10px] h-7 px-2.5 flex-1 flex items-center justify-center gap-1"
               onClick={handleInstall}
-              disabled={installing}
+              disabled={installing || isEngineRunning}
+              title={isEngineRunning ? 'Stop the engine first before installing' : undefined}
             >
               {installing ? (
                 <Loader2 className="w-3 h-3 animate-spin" />
               ) : (
                 <Download className="w-3 h-3" />
               )}
-              {installing ? '' : 'Install'}
+              {installing && installProgress ? installProgress.step : installing ? '' : 'Install'}
             </button>
           ) : (
             <button
               className="btn-secondary text-[10px] h-7 px-2.5 flex-1 flex items-center justify-center gap-1"
-              onClick={handleDetails}
+              onClick={handleLaunch}
             >
-              <FolderOpen className="w-3 h-3" /> Open
+              <Play className="w-3 h-3" /> Launch
             </button>
           )}
           <button

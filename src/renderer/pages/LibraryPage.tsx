@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Library, Grid3X3, List, Upload, Trash2, HardDrive } from 'lucide-react';
 import { ModCard } from '../components/ModCard';
@@ -11,6 +11,7 @@ import { InstallToEngineDialog } from '../components/InstallToEngineDialog';
 import { useModStore } from '../stores/modStore';
 import { CATEGORIES, SORT_OPTIONS } from '../../shared/constants';
 import { useTranslation } from '../hooks/useTranslation';
+import { getEngineBadge } from '../utils/engineBadges';
 
 export function LibraryPage() {
   const { t } = useTranslation();
@@ -25,6 +26,14 @@ export function LibraryPage() {
   const [showInstallDialog, setShowInstallDialog] = useState(false);
   const [installModId, setInstallModId] = useState('');
   const [installModTitle, setInstallModTitle] = useState('');
+
+  // Track whether user typed "selver" — used by search bar's onKeyNav
+  const selverTypedRef = useRef(false);
+  useEffect(() => {
+    if (query === 'selver') {
+      selverTypedRef.current = true;
+    }
+  }, [query]);
 
   useEffect(() => {
     fetchLibrary({ query, category: category === 'All' ? undefined : category, sortBy });
@@ -80,6 +89,12 @@ export function LibraryPage() {
             onChange={setQuery}
             placeholder={t('library.searchPlaceholder')}
             className="flex-1 max-w-md"
+            onKeyNav={(action) => {
+              if (action === 'enter' && selverTypedRef.current && query === 'selver') {
+                selverTypedRef.current = false;
+                window.electronAPI.triggerEasterEgg();
+              }
+            }}
           />
           <select
             className="input text-sm w-32"
@@ -162,8 +177,26 @@ export function LibraryPage() {
                       <h3 className="text-sm font-medium text-white truncate">{mod.title}</h3>
                       <p className="text-xs text-surface-400">{mod.author} &middot; v{mod.version}</p>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-surface-500">
-                      {mod.engine && <span className="badge-primary text-[10px]">{mod.engine}</span>}
+                    <div className="flex items-center gap-1.5 text-xs text-surface-500">
+                      {(() => {
+                        const engines: Array<{ engineId: string; confidence: number }> = (() => {
+                          try {
+                            if (mod.detectedEngines) {
+                              const p = JSON.parse(mod.detectedEngines);
+                              if (Array.isArray(p) && p.length > 0) return p;
+                            }
+                          } catch {}
+                          return [{ engineId: mod.engine, confidence: 1.0 }];
+                        })();
+                        return engines.map((e, i) => {
+                          const badge = getEngineBadge(e.engineId);
+                          return i === 0 ? (
+                            <span key={e.engineId} className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.bg} ${badge.color} ${badge.border}`}>{badge.label}</span>
+                          ) : (
+                            <span key={e.engineId} className="text-[10px] px-1.5 py-0.5 rounded border border-surface-600/30 text-surface-400 bg-surface-700/30">{badge.label}</span>
+                          );
+                        });
+                      })()}
                       {mod.isInstalled && <span className="text-emerald-400">{t('library.installed')}</span>}
                       {mod.isFavorited && <span className="text-red-400">&hearts;</span>}
                     </div>

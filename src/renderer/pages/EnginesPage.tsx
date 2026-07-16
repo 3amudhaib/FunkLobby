@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   Download, Play, RefreshCw, Wrench, Trash2,
   FolderOpen, ExternalLink, CheckCircle, AlertCircle,
-  Monitor, Shield,
+  Monitor, Shield, Square, Loader2,
 } from 'lucide-react';
 import { useEngineStore } from '../stores/engineStore';
 import { LoadingSpinner } from '../components/LoadingSpinner';
@@ -21,14 +21,14 @@ export function EnginesPage() {
     manual: { label: t('engines.manual'), color: 'text-surface-400 bg-surface-700' },
     direct_download: { label: t('engines.directDl'), color: 'text-primary-400 bg-primary-500/10' },
     unknown_repo: { label: t('engines.noRepo'), color: 'text-red-400 bg-red-500/10' },
-    no_releases: { label: t('engines.noReleases'), color: 'text-red-400 bg-red-500/10' },
+    unavailable: { label: t('engines.unavailable'), color: 'text-red-400 bg-red-500/10' },
   };
   const {
-    engines, catalog, loading, installProgress,
+    engines, catalog, loading, installProgress, runningEngines,
     fetchEngines, fetchCatalog, installEngine, uninstallEngine,
-    launchEngine, detectEngines, checkUpdates, updateEngine,
+    launchEngine, stopEngine, detectEngines, checkUpdates, updateEngine,
     repairEngine, verifyEngine, createShortcut, openFolder,
-    importExternalEngine, initProgressListener,
+    importExternalEngine, initProgressListener, initRunningStateListener,
   } = useEngineStore();
 
   const [tab, setTab] = useState<Tab>('all');
@@ -39,7 +39,20 @@ export function EnginesPage() {
   useEffect(() => {
     fetchEngines();
     fetchCatalog();
-    return initProgressListener();
+    const unsub1 = initProgressListener();
+    const unsub2 = initRunningStateListener();
+
+    // Listen for async catalog updates (release check results)
+    const handleCatalogUpdate = (updatedCatalog: any[]) => {
+      useEngineStore.setState({ catalog: updatedCatalog });
+    };
+    window.electronAPI.onCatalogUpdate(handleCatalogUpdate);
+
+    return () => {
+      unsub1();
+      unsub2();
+      window.electronAPI.removeCatalogUpdateListener(handleCatalogUpdate);
+    };
   }, []);
 
   const getEngineStatus = useCallback((engineType: string) => {
@@ -68,6 +81,16 @@ export function EnginesPage() {
       alert(err.message);
     }
   };
+
+  const handleStopEngine = async (id: string) => {
+    try {
+      await stopEngine(id);
+    } catch { /* ignore */ }
+  };
+
+  const isEngineRunning = useCallback((engineId: string) => {
+    return runningEngines.has(engineId);
+  }, [runningEngines]);
 
   const handleUninstall = async (id: string) => {
     if (!confirm(t('engines.uninstallConfirm'))) return;
@@ -252,11 +275,16 @@ height={150}
                             {t('engines.imported')}
                           </span>
                         )}
-                        {entry.installMethod && METHOD_LABELS[entry.installMethod] && (
+                        {entry.installMethod === 'checking' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full text-surface-400 bg-surface-700 animate-pulse">
+                            <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                            Loading...
+                          </span>
+                        ) : entry.installMethod && METHOD_LABELS[entry.installMethod] ? (
                           <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full ${METHOD_LABELS[entry.installMethod].color}`}>
                             {METHOD_LABELS[entry.installMethod].label}
                           </span>
-                        )}
+                        ) : null}
                         {(() => {
                           const s = installed?.status;
                           if (s === 'installed' || s === 'update_available') {
@@ -405,13 +433,24 @@ height={150}
                       ) : (
                         <>
                           {(installed.status === 'installed' || installed.status === 'update_available' || installed.status === 'broken_installation') && (
-                            <button
-                              className="btn-secondary text-xs"
-                              onClick={() => handleLaunch(installed.id)}
-                              title={t('engines.launch')}
-                            >
-                              <Play className="w-3 h-3" />
-                            </button>
+                            isEngineRunning(installed.id) ? (
+                              <button
+                                className="btn-secondary text-xs border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                                onClick={() => handleStopEngine(installed.id)}
+                                title={t('engines.running')}
+                              >
+                                <Square className="w-3 h-3" />
+                                {t('engines.running')}
+                              </button>
+                            ) : (
+                              <button
+                                className="btn-secondary text-xs"
+                                onClick={() => handleLaunch(installed.id)}
+                                title={t('engines.launch')}
+                              >
+                                <Play className="w-3 h-3" />
+                              </button>
+                            )
                           )}
                           <button
                             className="btn-secondary text-xs"
@@ -525,13 +564,24 @@ height={150}
                         )}
 
                         <div className="flex flex-wrap gap-2 mt-auto pt-2">
-                          <button
-                            className="btn-secondary text-xs"
-                            onClick={() => handleLaunch(engine.id)}
-                            title={t('engines.launch')}
-                          >
-                            <Play className="w-3 h-3" />
-                          </button>
+                          {isEngineRunning(engine.id) ? (
+                            <button
+                              className="btn-secondary text-xs border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                              onClick={() => handleStopEngine(engine.id)}
+                              title={t('engines.running')}
+                            >
+                              <Square className="w-3 h-3" />
+                              {t('engines.running')}
+                            </button>
+                          ) : (
+                            <button
+                              className="btn-secondary text-xs"
+                              onClick={() => handleLaunch(engine.id)}
+                              title={t('engines.launch')}
+                            >
+                              <Play className="w-3 h-3" />
+                            </button>
+                          )}
                           <button
                             className="btn-secondary text-xs"
                             onClick={() => handleRepair(engine.id)}

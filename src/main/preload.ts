@@ -77,12 +77,41 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getEngineLogs: (engineId: string) => ipcRenderer.invoke('engines:logs', engineId),
   importExternalEngine: () => ipcRenderer.invoke('engines:importExternal'),
 
+  // Engine running state
+  getRunningEngines: () => ipcRenderer.invoke('engines:getRunning'),
+  stopEngine: (engineId: string) => ipcRenderer.invoke('engines:stop', engineId),
+  validateAllEngines: () => ipcRenderer.invoke('engines:validateAll'),
+
+  // Engine running state events
+  onEnginesRunningChanged: (callback: (ids: string[]) => void) => {
+    ipcRenderer.on('engines:runningChanged', (_event: any, ids: string[]) => callback(ids));
+  },
+  removeEnginesRunningChangedListener: (callback: (ids: string[]) => void) => {
+    ipcRenderer.removeListener('engines:runningChanged', callback as any);
+  },
+
   // Engine install progress events
   onEngineInstallProgress: (callback: (data: { engineType: string; percent: number; status: string }) => void) => {
     ipcRenderer.on('engine:installProgress', (_event, data) => callback(data));
   },
   removeEngineInstallProgressListener: (callback: (data: any) => void) => {
     ipcRenderer.removeListener('engine:installProgress', callback);
+  },
+
+  // Mod install progress events
+  onModInstallProgress: (callback: (data: { step: string; percent: number }) => void) => {
+    ipcRenderer.on('mod:installProgress', (_event, data) => callback(data));
+  },
+  removeModInstallProgressListener: (callback: (data: any) => void) => {
+    ipcRenderer.removeListener('mod:installProgress', callback);
+  },
+
+  // Catalog update events
+  onCatalogUpdate: (callback: (catalog: any[]) => void) => {
+    ipcRenderer.on('catalog:update', (_event, catalog) => callback(catalog));
+  },
+  removeCatalogUpdateListener: (callback: (catalog: any[]) => void) => {
+    ipcRenderer.removeListener('catalog:update', callback as any);
   },
 
   // Profile operations
@@ -113,6 +142,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   closeWindow: () => ipcRenderer.invoke('app:close'),
   getLogs: (level?: string) => ipcRenderer.invoke('app:getLogs', level),
   clearAllData: () => ipcRenderer.invoke('app:clearData'),
+  clearCacheOnly: () => ipcRenderer.invoke('app:clearCache'),
+  resetAppKeepFiles: () => ipcRenderer.invoke('app:resetApp'),
+
+  // Diagnostics
+  runDiagnostics: () => ipcRenderer.invoke('app:runDiagnostics'),
+  repairInstallation: () => ipcRenderer.invoke('app:repairInstallation'),
 
   // Local import operations
   selectLocalModFolder: () => ipcRenderer.invoke('mods:selectLocalModFolder'),
@@ -130,12 +165,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Cache operations
   getCacheSize: () => ipcRenderer.invoke('cache:getSize'),
   clearCache: (type?: 'api' | 'thumbnails' | 'all') => ipcRenderer.invoke('cache:clear', type),
+  getCachedThumbnail: (url: string) => ipcRenderer.invoke('cache:getCachedThumbnail', url),
 
   // Discover operations
   discoverGetSection: (section: string) => ipcRenderer.invoke('discover:getSection', section),
   discoverGetRichDetails: (gameBananaId: number) => ipcRenderer.invoke('discover:getRichDetails', gameBananaId),
   discoverSearch: (params: any) => ipcRenderer.invoke('discover:search', params),
   discoverDownloadUrl: (gameBananaId: number) => ipcRenderer.invoke('discover:downloadUrl', gameBananaId),
+
+  // GameBanana stats & comments
+  getModStats: (gameBananaId: number) => ipcRenderer.invoke('discover:getStats', gameBananaId),
+  getModComments: (gameBananaId: number, page?: number) => ipcRenderer.invoke('discover:getComments', gameBananaId, page || 1),
 
   // Update operations
   checkUpdatesApp: (force?: boolean) => ipcRenderer.invoke('update:check', force),
@@ -146,4 +186,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setAutoUpdateApp: (enabled: boolean) => ipcRenderer.invoke('update:setAutoUpdate', enabled),
   getUpdateChannel: () => ipcRenderer.invoke('update:getChannel'),
   getAutoUpdateApp: () => ipcRenderer.invoke('update:getAutoUpdate'),
+
+  // Easter egg
+  triggerEasterEgg: () => ipcRenderer.invoke('easter-egg:trigger'),
+  onEasterEggOverlay: (callback: (data: { imageDataUrl: string }) => void) => {
+    ipcRenderer.on('easter-egg:overlay', (_event, data) => callback(data));
+  },
+  removeEasterEggOverlayListener: (callback: (data: any) => void) => {
+    ipcRenderer.removeListener('easter-egg:overlay', callback);
+  },
+  onEasterEggCleanup: (callback: () => void) => {
+    ipcRenderer.on('easter-egg:cleanup', () => callback());
+  },
+  removeEasterEggCleanupListener: (callback: () => void) => {
+    ipcRenderer.removeListener('easter-egg:cleanup', callback as any);
+  },
 });

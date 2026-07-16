@@ -203,7 +203,7 @@
   "engines.manual": "Manual",
   "engines.directDl": "Direct DL",
   "engines.noRepo": "No Repo",
-  "engines.noReleases": "No Releases",
+  "engines.unavailable": "Unavailable",
   "engines.downloading": "Downloading...",
   "engines.error": "Error",
   "engines.github": "GitHub",

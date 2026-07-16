@@ -1,5 +1,5 @@
 export const APP_NAME = 'FunkLobby';
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.0.7';
 export const APP_REPO = 'https://github.com/3amudhaib/FunkLobby';
 
 export { ENGINE_CATALOG } from './engineTypes';
@@ -90,6 +90,7 @@ export const DEFAULT_SETTINGS = {
   autoUpdate: true,
   autoUpdateMods: true,
   smartScreenDismissed: 'false',
+  welcomeShown: 'false',
 };
 
 export const IPC_CHANNELS = {
@@ -179,6 +180,8 @@ export const IPC_CHANNELS = {
   CLOSE_WINDOW: 'app:close',
   GET_LOGS: 'app:getLogs',
   CLEAR_ALL_DATA: 'app:clearData',
+  CLEAR_CACHE_ONLY: 'app:clearCache',
+  RESET_APP_KEEP_FILES: 'app:resetApp',
 
   // Local import operations
   SELECT_LOCAL_MOD_FOLDER: 'mods:selectLocalModFolder',
@@ -194,7 +197,34 @@ export const IPC_CHANNELS = {
   // Engine install progress (main → renderer)
   ENGINE_INSTALL_PROGRESS: 'engine:installProgress',
 
+  // Engine running state
+  GET_RUNNING_ENGINES: 'engines:getRunning',
+  STOP_ENGINE: 'engines:stop',
+  VALIDATE_ALL_ENGINES: 'engines:validateAll',
+
+  // Engine running state changed event (main → renderer)
+  ENGINES_RUNNING_CHANGED: 'engines:runningChanged',
+
   // Cache operations
   GET_CACHE_SIZE: 'cache:getSize',
   CLEAR_CACHE: 'cache:clear',
+
+  // Thumbnail cache
+  GET_THUMBNAIL_CACHE: 'cache:getThumbnail',
+  SET_THUMBNAIL_CACHE: 'cache:setThumbnail',
+  GET_CACHED_THUMBNAIL_PATH: 'cache:getCachedThumbnailPath',
+
+  // GameBanana stats & comments
+  GET_MOD_STATS: 'discover:getStats',
+  GET_MOD_COMMENTS: 'discover:getComments',
+
+  // Catalog updates (push from main to renderer when async release checks complete)
+  CATALOG_UPDATE: 'catalog:update',
+
+  // Diagnostics
+  RUN_DIAGNOSTICS: 'app:runDiagnostics',
+  REPAIR_INSTALLATION: 'app:repairInstallation',
+
+  // Easter egg
+  EASTER_EGG_TRIGGER: 'easter-egg:trigger',
 } as const;

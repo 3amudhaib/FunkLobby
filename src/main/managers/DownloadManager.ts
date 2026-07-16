@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import stream from 'stream';
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, app } from 'electron';
 import { getPrisma } from './PrismaManager';
 import { LogManager } from './LogManager';
 import { SettingsManager } from './SettingsManager';
@@ -64,7 +64,7 @@ class DownloadManagerClass {
   async startDownload(modId: string, url: string, fileName: string, hash?: string): Promise<string> {
     const prisma = getPrisma();
     const settings = await SettingsManager.getAll();
-    const downloadFolder = settings.downloadFolder || path.join(process.env.USERPROFILE || '', 'Downloads', 'FunkLobby');
+    const downloadFolder = settings.downloadFolder || path.join(app.getPath('downloads'), 'FunkLobby');
 
     if (!await asyncFs.exists(downloadFolder).catch(() => false)) {
       await asyncFs.mkdir(downloadFolder, { recursive: true });

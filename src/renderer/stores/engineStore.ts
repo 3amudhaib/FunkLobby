@@ -29,6 +29,8 @@ interface EngineState {
   catalogLoaded: boolean;
   error: string | null;
   installProgress: Record<string, { percent: number; status: string }>;
+  /** Set of engine IDs that are currently running */
+  runningEngines: Set<string>;
 
   fetchEngines: () => Promise<void>;
   fetchCatalog: () => Promise<void>;
@@ -36,6 +38,8 @@ interface EngineState {
   installEngine: (engineType: string) => Promise<void>;
   uninstallEngine: (engineId: string) => Promise<void>;
   launchEngine: (engineId: string) => Promise<void>;
+  stopEngine: (engineId: string) => Promise<void>;
+  fetchRunningEngines: () => Promise<void>;
   detectEngines: () => Promise<void>;
   selectDefault: (id: string) => Promise<void>;
   launchMod: (modId: string, engineId: string) => Promise<void>;
@@ -47,6 +51,8 @@ interface EngineState {
   createShortcut: (engineId: string) => Promise<void>;
   importExternalEngine: () => Promise<any>;
   initProgressListener: () => () => void;
+  initRunningStateListener: () => () => void;
+  validateAllEngines: () => Promise<any>;
 }
 
 export const useEngineStore = create<EngineState>((set, get) => ({
@@ -58,6 +64,7 @@ export const useEngineStore = create<EngineState>((set, get) => ({
   catalogLoaded: false,
   error: null,
   installProgress: {},
+  runningEngines: new Set<string>(),
 
   fetchEngines: async () => {
     try {
@@ -113,6 +120,20 @@ export const useEngineStore = create<EngineState>((set, get) => ({
 
   launchEngine: async (engineId: string) => {
     await window.electronAPI.launchEngine(engineId);
+    // After launch, refresh running state
+    await get().fetchRunningEngines();
+  },
+
+  stopEngine: async (engineId: string) => {
+    await window.electronAPI.stopEngine(engineId);
+    await get().fetchRunningEngines();
+  },
+
+  fetchRunningEngines: async () => {
+    try {
+      const ids = await window.electronAPI.getRunningEngines();
+      set({ runningEngines: new Set(ids) });
+    } catch { /* ignore */ }
   },
 
   detectEngines: async () => {
@@ -164,6 +185,12 @@ export const useEngineStore = create<EngineState>((set, get) => ({
     return result;
   },
 
+  validateAllEngines: async () => {
+    try {
+      return await window.electronAPI.validateAllEngines();
+    } catch { return null; }
+  },
+
   initProgressListener: () => {
     const cb = (data: { engineType: string; percent: number; status: string }) => {
       set(state => ({
@@ -183,5 +210,15 @@ export const useEngineStore = create<EngineState>((set, get) => ({
     };
     window.electronAPI.onEngineInstallProgress(cb);
     return () => window.electronAPI.removeEngineInstallProgressListener(cb);
+  },
+
+  initRunningStateListener: () => {
+    const cb = (ids: string[]) => {
+      set({ runningEngines: new Set(ids) });
+    };
+    window.electronAPI.onEnginesRunningChanged(cb);
+    // Fetch initial state
+    get().fetchRunningEngines();
+    return () => window.electronAPI.removeEnginesRunningChangedListener(cb);
   },
 }));

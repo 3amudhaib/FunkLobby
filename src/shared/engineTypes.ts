@@ -1,4 +1,4 @@
-export type InstallMethod = 'binary' | 'source_only' | 'manual' | 'direct_download' | 'unknown_repo' | 'no_releases';
+export type InstallMethod = 'binary' | 'source_only' | 'manual' | 'direct_download' | 'unknown_repo' | 'unavailable' | 'checking';
 
 export interface EngineCatalogEntry {
   id: string;
@@ -87,20 +87,18 @@ export function classifyEngineInstallMethod(entry: EngineCatalogEntry, release: 
     return 'unknown_repo';
   }
   if (!entry.repoOwner || !entry.repoName) return 'unknown_repo';
-  if (!release || !release.assets || release.assets.length === 0) return 'no_releases';
+  if (!release) return 'unavailable';
+
+  const assets = release.assets || [];
+  if (assets.length === 0) return 'source_only';
 
   // Only Windows is supported for automatic installation
   const isWindows = process.platform === 'win32';
   if (!isWindows) return 'source_only';
 
-  const names = release.assets.map(a => a.name.toLowerCase());
+  const names = assets.map(a => a.name.toLowerCase());
 
-  // Strict binary detection: must have an actual .exe file, or a zip/7z
-  // that clearly contains a Windows build (not marked as source/debug/linux/mac)
   const hasExe = names.some(n => n.endsWith('.exe'));
-
-  // Also check if any asset name matches the engine's known binary hint
-  // (e.g. 'fpsplus' in 'fpsplus_v9_0_0.zip', 'mic.dUP' in 'FNF-Mic.dUP-v2.0.3.zip')
   const hint = entry.binaryAssetName?.toLowerCase();
   const hasHintMatch = hint ? names.some(n => n.includes(hint)) : false;
 
@@ -116,11 +114,10 @@ export function classifyEngineInstallMethod(entry: EngineCatalogEntry, release: 
 
   if (hasExe || hasWindowsZip) return 'binary';
 
-  // Only mark as source_only if the zip name actually contains source-related keywords
   const hasOnlySource = names.some(n => n.includes('source') || n.includes('src'));
   if (hasOnlySource) return 'source_only';
 
-  return 'no_releases';
+  return 'unavailable';
 }
 
 const KNOWN_ENGINES: Array<{
