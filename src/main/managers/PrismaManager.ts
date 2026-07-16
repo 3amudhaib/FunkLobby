@@ -60,12 +60,18 @@ export async function initDatabase() {
 }
 
 async function migrateSchema(client: PrismaClient) {
-  const modColumns = ['coverPath', 'customCover'];
+  const modColumns = ['coverPath', 'customCover', 'detectedEngines'];
   for (const col of modColumns) {
     try {
-      const type = col === 'customCover' ? 'INTEGER' : 'TEXT';
+      const type = col === 'customCover' ? 'INTEGER' : col === 'detectedEngines' ? 'TEXT NOT NULL DEFAULT \'[]\'' : 'TEXT';
       await client.$executeRawUnsafe(`ALTER TABLE Mod ADD COLUMN ${col} ${type};`);
     } catch {
+      // Column already exists — ensure no NULL values for detectedEngines
+      if (col === 'detectedEngines') {
+        try {
+          await client.$executeRawUnsafe(`UPDATE Mod SET detectedEngines = '[]' WHERE detectedEngines IS NULL;`);
+        } catch {}
+      }
     }
   }
   const engineColumns = [
@@ -130,7 +136,8 @@ async function pushSchema() {
       isPopular INTEGER NOT NULL DEFAULT 0,
       isFavorited INTEGER NOT NULL DEFAULT 0,
       coverPath TEXT,
-      customCover INTEGER NOT NULL DEFAULT 0
+      customCover INTEGER NOT NULL DEFAULT 0,
+      detectedEngines TEXT NOT NULL DEFAULT '[]'
     );
     CREATE TABLE IF NOT EXISTS Download (
       id TEXT PRIMARY KEY,
