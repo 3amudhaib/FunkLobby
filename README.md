@@ -9,3 +9,5 @@ This does NOT necessarily indicate malware. The application is open-source, and 
 Future releases may include a code-signing certificate.
 
 Please note that there may be some errors or issues with the app; if you encounter any, please send details to this email address: kinimation28@gmail.com.
+
+Notice: We are temporarily pausing updates starting with version 1.0.7 to address some known issues and stabilize the game. Thank you for your patience and support
